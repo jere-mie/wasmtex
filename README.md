@@ -4,7 +4,7 @@
 
 ### A privacy-first, browser-based LaTeX editor powered by WebAssembly.
 
-Write, compile, and preview LaTeX documents — entirely in your browser. No server. No install. No data leaves your machine.
+Write, compile, and preview LaTeX documents - entirely in your browser. No server. No install. No data leaves your machine.
 
 **[Launch Editor →](https://latex.zxcv.fyi)**
 
@@ -14,7 +14,7 @@ Write, compile, and preview LaTeX documents — entirely in your browser. No ser
 
 ## How It Works
 
-WasmTeX runs a complete TeX engine via **WebAssembly** in a Web Worker, keeping your UI responsive while compiling. All files live in a **Virtual File System (VFS)** backed by IndexedDB — your documents persist across sessions without any server.
+WasmTeX runs a complete TeX engine via **WebAssembly** in a Web Worker, keeping your UI responsive while compiling. All files live in a **Virtual File System (VFS)** backed by IndexedDB - your documents persist across sessions without any server.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -70,11 +70,11 @@ npm run build
 
 ## Features
 
-- **Full IDE Layout** — Resizable 3-panel design: file explorer, tabbed editor, and PDF preview with console
-- **Monaco Editor** — VS Code's editor engine with custom LaTeX syntax highlighting and a bespoke dark theme
-- **Virtual File System** — Create, rename, and delete `.tex` files with automatic IndexedDB persistence
-- **Web Worker Compilation** — TeX runs off the main thread for a responsive editing experience
-- **Zero Backend** — Everything happens client-side. Your documents never leave your browser
+- **Full IDE Layout** - Resizable 3-panel design: file explorer, tabbed editor, and PDF preview with console
+- **Monaco Editor** - VS Code's editor engine with custom LaTeX syntax highlighting and a bespoke dark theme
+- **Virtual File System** - Create, rename, and delete `.tex` files with automatic IndexedDB persistence
+- **Web Worker Compilation** - TeX runs off the main thread for a responsive editing experience
+- **Zero Backend** - Everything happens client-side. Your documents never leave your browser
 
 ## License
 

@@ -89,7 +89,7 @@ export function Toolbar({ onCompileResult, isCompiling, setIsCompiling }: Toolba
         ) : (
           <Play className="h-3.5 w-3.5" />
         )}
-        {isCompiling ? "Compiling…" : "Compile"}
+        {isCompiling ? "Compiling..." : "Compile"}
       </Button>
 
       {/* New File */}

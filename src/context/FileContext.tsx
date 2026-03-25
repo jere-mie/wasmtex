@@ -25,7 +25,7 @@ const DEFAULT_MAIN_TEX = `\\documentclass{article}
 \\section{Introduction}
 Welcome to \\textbf{WasmTeX}, a browser-based \\LaTeX\\ editor powered by WebAssembly.
 
-This document is being compiled entirely in your browser — no server required.
+This document is being compiled entirely in your browser - no server required.
 
 \\section{Mathematics}
 The beauty of \\LaTeX\\ lies in its typesetting. Consider Euler's identity:

@@ -81,7 +81,7 @@ self.onmessage = async (event: MessageEvent<CompileRequest>) => {
           `Compilation failed with ${errors.length} error(s) in ${elapsed}ms.`,
           ``,
           `Note: Full TeX compilation requires loading the SwiftLaTeX WASM engine.`,
-          `The editor is fully functional — connect a WASM TeX binary to enable PDF output.`,
+          `The editor is fully functional - connect a WASM TeX binary to enable PDF output.`,
         ].join("\n"),
         errors,
       };
