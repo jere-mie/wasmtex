@@ -1,5 +1,6 @@
 import { useRef, useEffect } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
+import * as monaco from "monaco-editor";
 import type { editor } from "monaco-editor";
 import { useFiles } from "@/context/FileContext";
 import {
@@ -119,7 +120,7 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
         envCompletionRegistered = true;
         monaco.languages.registerCompletionItemProvider("latex", {
           triggerCharacters: ["}"],
-          provideCompletionItems(model, position) {
+          provideCompletionItems(model: monaco.editor.ITextModel, position: monaco.Position) {
             const lineContent = model.getLineContent(position.lineNumber);
             const textBefore = lineContent.substring(0, position.column - 1);
             const match = textBefore.match(/\\begin\{([^}]+)\}$/);
