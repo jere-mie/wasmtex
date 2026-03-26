@@ -37,6 +37,16 @@ export function CompileConsole({ compileResult, isCompiling, compilePhase }: Com
   const isInitializing = isCompiling && compilePhase === "initializing";
   const isRunning = isCompiling && compilePhase === "compiling";
 
+  // Fake progress: ease quickly to ~80% over 90s, then crawl toward 95%.
+  // Snaps to 100% the moment the compiling phase starts.
+  const initProgress = (() => {
+    if (!isCompiling) return 0;
+    if (!isInitializing) return 100; // compiling phase = done initializing
+    // logistic-ish curve: fast early, slow late, caps at 95
+    const t = elapsed / 90; // normalise to ~90 s target
+    return Math.min(95, 95 * (1 - Math.exp(-3 * t)));
+  })();
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-ink-950 border-t border-ink-700">
       {/* Console header */}
@@ -83,12 +93,22 @@ export function CompileConsole({ compileResult, isCompiling, compilePhase }: Com
       <ScrollArea className="min-h-0 flex-1">
         <div className="p-3 font-mono text-xs leading-relaxed space-y-3">
           {isInitializing && (
-            <div className="rounded-md border border-amber-glow/20 bg-amber-glow/5 p-3 space-y-1.5">
+            <div className="rounded-md border border-amber-glow/20 bg-amber-glow/5 p-3 space-y-2">
               <div className="flex items-center gap-2 text-amber-glow">
                 <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
                 <span className="font-semibold">Downloading TeX engine...</span>
+                <span className="ml-auto font-mono text-[10px] text-ink-400">
+                  {Math.round(initProgress)}%
+                </span>
               </div>
-              <p className="text-ink-400 text-[11px] leading-relaxed pl-5">
+              {/* Progress bar */}
+              <div className="h-1.5 w-full rounded-full bg-ink-800 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-amber-glow transition-[width] duration-1000 ease-out"
+                  style={{ width: `${initProgress}%` }}
+                />
+              </div>
+              <p className="text-ink-400 text-[11px] leading-relaxed">
                 The TeX runtime (~430 MB) is being fetched from the server. This only happens
                 once - subsequent compiles will be fast. Please wait, this may take up to a
                 minute depending on your connection.
