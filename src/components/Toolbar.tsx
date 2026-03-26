@@ -42,7 +42,9 @@ export function Toolbar({ onCompile, isCompiling }: ToolbarProps) {
   const handleDownload = () => {
     if (files.length === 0) return;
     const zip = buildZip(files.map((f) => ({ name: f.name, content: f.content })));
-    const url = URL.createObjectURL(new Blob([zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength)], { type: "application/zip" }));
+    const buf = new ArrayBuffer(zip.byteLength);
+    new Uint8Array(buf).set(zip);
+    const url = URL.createObjectURL(new Blob([buf], { type: "application/zip" }));
     const a = document.createElement("a");
     a.href = url;
     a.download = "wasmtex-project.zip";
