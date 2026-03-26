@@ -7,20 +7,23 @@ interface CompileConsoleProps {
   compileResult: CompileResponse | null;
   isCompiling: boolean;
   compilePhase: CompileStatusMessage["phase"] | null;
+  compileStartTime: number | null;
 }
 
-export function CompileConsole({ compileResult, isCompiling, compilePhase }: CompileConsoleProps) {
+export function CompileConsole({ compileResult, isCompiling, compilePhase, compileStartTime }: CompileConsoleProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
+  const [, forceUpdate] = useState(0);
 
-  // Tick elapsed seconds while compiling
+  // Tick every second while compiling so elapsed re-derives from the stable startTime prop.
+  // This survives remounts: even if the component mounts mid-download it shows correct elapsed.
   useEffect(() => {
-    if (!isCompiling) { setElapsed(0); return; }
-    setElapsed(0);
-    const id = setInterval(() => setElapsed((s) => s + 1), 1000);
+    if (!isCompiling) return;
+    const id = setInterval(() => forceUpdate((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, [isCompiling]);
+
+  const elapsed = compileStartTime != null ? Math.floor((Date.now() - compileStartTime) / 1000) : 0;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

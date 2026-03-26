@@ -83,6 +83,7 @@ function App() {
   const [compileResult, setCompileResult] = useState<CompileResponse | null>(null);
   const [isCompiling, setIsCompiling] = useState(false);
   const [compilePhase, setCompilePhase] = useState<CompileStatusMessage["phase"] | null>(null);
+  const [compileStartTime, setCompileStartTime] = useState<number | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [previewWidth, setPreviewWidth] = useState(DEFAULT_PREVIEW_WIDTH);
   const [consoleHeight, setConsoleHeight] = useState(DEFAULT_CONSOLE_HEIGHT);
@@ -96,6 +97,7 @@ function App() {
     setCompileResult(result);
     setIsCompiling(false);
     setCompilePhase(null);
+    setCompileStartTime(null);
     if (result.success) {
       toast.success("Compilation successful", {
         description: "Document built without errors.",
@@ -111,6 +113,7 @@ function App() {
     if (isCompiling) return;
 
     setIsCompiling(true);
+    setCompileStartTime(Date.now());
 
     if (!workerRef.current) {
       workerRef.current = new Worker(
@@ -328,7 +331,7 @@ function App() {
                   <PdfPreview compileResult={compileResult} />
                 </div>
                 <div className="shrink-0" style={{ height: 180 }}>
-                  <CompileConsole compileResult={compileResult} isCompiling={isCompiling} compilePhase={compilePhase} />
+                  <CompileConsole compileResult={compileResult} isCompiling={isCompiling} compilePhase={compilePhase} compileStartTime={compileStartTime} />
                 </div>
               </div>
             )}
@@ -387,7 +390,7 @@ function App() {
             </div>
             <ResizeHandle orientation="vertical" onPointerDown={beginVerticalResize} />
             <div className="min-h-0 shrink-0" style={{ height: consoleHeight }}>
-              <CompileConsole compileResult={compileResult} isCompiling={isCompiling} compilePhase={compilePhase} />
+              <CompileConsole compileResult={compileResult} isCompiling={isCompiling} compilePhase={compilePhase} compileStartTime={compileStartTime} />
             </div>
           </div>
         </div>
