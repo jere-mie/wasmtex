@@ -7,6 +7,11 @@ import {
   type ReactNode,
 } from "react";
 import { get, set, del, keys } from "idb-keyval";
+import {
+  type VFSFile,
+  getAncestorFolders,
+  normalizePath,
+} from "@/lib/project-files";
 
 const DEFAULT_MAIN_TEX = `\\documentclass{article}
 \\usepackage{amsmath}
@@ -50,32 +55,92 @@ Or the quadratic formula:
 \\end{document}
 `;
 
-export interface VFSFile {
-  name: string;
-  content: string;
-}
-
 interface FileContextType {
   files: VFSFile[];
+  folders: string[];
   activeFile: string | null;
   openFiles: string[];
   setActiveFile: (name: string) => void;
   openFile: (name: string) => void;
   closeFile: (name: string) => void;
   createFile: (name: string, content?: string) => void;
+  createFolder: (path: string) => void;
   renameFile: (oldName: string, newName: string) => void;
+  renameFolder: (oldPath: string, newPath: string) => void;
   deleteFile: (name: string) => void;
-  importFiles: (incomingFiles: VFSFile[]) => void;
+  deleteFolder: (path: string) => void;
+  importFiles: (incomingFiles: VFSFile[], incomingFolders?: string[]) => void;
   updateFileContent: (name: string, content: string) => void;
+  getFile: (name: string) => VFSFile | undefined;
   getFileContent: (name: string) => string | undefined;
 }
 
 const FileContext = createContext<FileContextType | null>(null);
 
 const IDB_PREFIX = "wasmtex:";
+const IDB_FOLDERS_KEY = `${IDB_PREFIX}__folders__`;
+
+function sortFiles(nextFiles: VFSFile[]) {
+  return [...nextFiles].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function sortFolders(nextFolders: string[]) {
+  return [...new Set(nextFolders.map((folder) => normalizePath(folder)).filter(Boolean))].sort((left, right) =>
+    left.localeCompare(right)
+  );
+}
+
+function mergeFolders(existingFolders: string[], incomingFolders: string[]) {
+  return sortFolders([...existingFolders, ...incomingFolders]);
+}
+
+function serializeFile(file: VFSFile) {
+  return {
+    content: file.content,
+    kind: file.kind,
+    mimeType: file.mimeType,
+  };
+}
+
+function isPersistedFileRecord(
+  value: unknown
+): value is { content: string | Uint8Array; kind?: string; mimeType?: string } {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "content" in value &&
+    (typeof value.content === "string" || value.content instanceof Uint8Array)
+  );
+}
+
+function deserializeFile(name: string, value: unknown): VFSFile {
+  if (typeof value === "string") {
+    return {
+      name,
+      content: value,
+      kind: "text",
+    };
+  }
+
+  if (isPersistedFileRecord(value)) {
+    return {
+      name,
+      content: value.content,
+      kind: value.kind === "binary" ? "binary" : "text",
+      mimeType: typeof value.mimeType === "string" ? value.mimeType : undefined,
+    };
+  }
+
+  return {
+    name,
+    content: "",
+    kind: "text",
+  };
+}
 
 export function FileProvider({ children }: { children: ReactNode }) {
   const [files, setFiles] = useState<VFSFile[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -85,17 +150,20 @@ export function FileProvider({ children }: { children: ReactNode }) {
     (async () => {
       const allKeys = await keys();
       const vfsKeys = (allKeys as string[]).filter((k) =>
-        k.startsWith(IDB_PREFIX)
+        k.startsWith(IDB_PREFIX) && k !== IDB_FOLDERS_KEY
       );
+      const storedFolders = await get(IDB_FOLDERS_KEY);
 
       if (vfsKeys.length === 0) {
         // Initialize with default main.tex
         const defaultFile: VFSFile = {
           name: "main.tex",
           content: DEFAULT_MAIN_TEX,
+          kind: "text",
         };
-        await set(IDB_PREFIX + "main.tex", DEFAULT_MAIN_TEX);
+        await set(IDB_PREFIX + "main.tex", serializeFile(defaultFile));
         setFiles([defaultFile]);
+        setFolders([]);
         setActiveFile("main.tex");
         setOpenFiles(["main.tex"]);
       } else {
@@ -103,53 +171,151 @@ export function FileProvider({ children }: { children: ReactNode }) {
         for (const key of vfsKeys) {
           const name = (key as string).replace(IDB_PREFIX, "");
           const content = await get(key);
-          loaded.push({ name, content: content as string });
+          loaded.push(deserializeFile(name, content));
         }
-        loaded.sort((a, b) => a.name.localeCompare(b.name));
-        setFiles(loaded);
-        setActiveFile(loaded[0]?.name ?? null);
-        setOpenFiles([loaded[0]?.name].filter(Boolean) as string[]);
+        const nextFiles = sortFiles(loaded);
+        const derivedFolders = nextFiles.flatMap((file) => getAncestorFolders(file.name));
+        const nextFolders = mergeFolders(
+          Array.isArray(storedFolders) ? (storedFolders as string[]) : [],
+          derivedFolders
+        );
+
+        setFiles(nextFiles);
+        setFolders(nextFolders);
+        setActiveFile(nextFiles[0]?.name ?? null);
+        setOpenFiles([nextFiles[0]?.name].filter(Boolean) as string[]);
       }
       setLoaded(true);
     })();
   }, []);
 
-  const persistFile = useCallback(async (name: string, content: string) => {
-    await set(IDB_PREFIX + name, content);
+  const persistFile = useCallback(async (file: VFSFile) => {
+    await set(IDB_PREFIX + file.name, serializeFile(file));
+  }, []);
+
+  const persistFolders = useCallback(async (nextFolders: string[]) => {
+    await set(IDB_FOLDERS_KEY, sortFolders(nextFolders));
   }, []);
 
   const createFile = useCallback(
     (name: string, content = "") => {
-      if (files.some((f) => f.name === name)) return;
-      const newFile: VFSFile = { name, content };
-      setFiles((prev) => [...prev, newFile].sort((a, b) => a.name.localeCompare(b.name)));
-      setOpenFiles((prev) => (prev.includes(name) ? prev : [...prev, name]));
-      setActiveFile(name);
-      persistFile(name, content);
+      const normalizedName = normalizePath(name);
+      if (!normalizedName || files.some((f) => f.name === normalizedName)) return;
+      const newFile: VFSFile = { name: normalizedName, content, kind: "text" };
+      const nextFolders = mergeFolders(folders, getAncestorFolders(normalizedName));
+      setFiles((prev) => sortFiles([...prev, newFile]));
+      setFolders(nextFolders);
+      setOpenFiles((prev) => (prev.includes(normalizedName) ? prev : [...prev, normalizedName]));
+      setActiveFile(normalizedName);
+      void persistFile(newFile);
+      void persistFolders(nextFolders);
     },
-    [files, persistFile]
+    [files, folders, persistFile, persistFolders]
+  );
+
+  const createFolder = useCallback(
+    (path: string) => {
+      const normalizedPath = normalizePath(path);
+      if (!normalizedPath) return;
+      const nextFolders = mergeFolders(folders, [...getAncestorFolders(`${normalizedPath}/placeholder`), normalizedPath]);
+      setFolders(nextFolders);
+      void persistFolders(nextFolders);
+    },
+    [folders, persistFolders]
   );
 
   const renameFile = useCallback(
     (oldName: string, newName: string) => {
-      if (files.some((f) => f.name === newName)) return;
+      const normalizedNewName = normalizePath(newName);
+      if (!normalizedNewName || files.some((f) => f.name === normalizedNewName)) return;
       setFiles((prev) =>
-        prev
-          .map((f) => (f.name === oldName ? { ...f, name: newName } : f))
-          .sort((a, b) => a.name.localeCompare(b.name))
+        sortFiles(prev.map((f) => (f.name === oldName ? { ...f, name: normalizedNewName } : f)))
       );
       setOpenFiles((prev) =>
-        prev.map((n) => (n === oldName ? newName : n))
+        prev.map((n) => (n === oldName ? normalizedNewName : n))
       );
-      if (activeFile === oldName) setActiveFile(newName);
+      if (activeFile === oldName) setActiveFile(normalizedNewName);
+      const nextFolders = mergeFolders(folders, getAncestorFolders(normalizedNewName));
+      setFolders(nextFolders);
       // Migrate IDB
-      (async () => {
-        const content = await get(IDB_PREFIX + oldName);
-        await set(IDB_PREFIX + newName, content);
+      void (async () => {
+        const targetFile = files.find((file) => file.name === oldName);
+        if (targetFile) {
+          await persistFile({ ...targetFile, name: normalizedNewName });
+        }
         await del(IDB_PREFIX + oldName);
+        await persistFolders(nextFolders);
       })();
     },
-    [files, activeFile]
+    [files, activeFile, folders, persistFile, persistFolders]
+  );
+
+  const renameFolder = useCallback(
+    (oldPath: string, newPath: string) => {
+      const sourcePrefix = normalizePath(oldPath);
+      const targetPrefix = normalizePath(newPath);
+      if (!sourcePrefix || !targetPrefix || sourcePrefix === targetPrefix) return;
+
+      const prefixWithSlash = `${sourcePrefix}/`;
+      const targetWithSlash = `${targetPrefix}/`;
+      const hasConflict =
+        files.some(
+          (file) =>
+            !file.name.startsWith(prefixWithSlash) &&
+            (file.name === targetPrefix || file.name.startsWith(targetWithSlash))
+        ) ||
+        folders.some(
+          (folder) =>
+            folder !== sourcePrefix &&
+            !folder.startsWith(prefixWithSlash) &&
+            (folder === targetPrefix || folder.startsWith(targetWithSlash))
+        );
+
+      if (hasConflict) return;
+
+      const renamedFiles = files.map((file) =>
+        file.name.startsWith(prefixWithSlash)
+          ? { ...file, name: `${targetPrefix}/${file.name.slice(prefixWithSlash.length)}` }
+          : file
+      );
+      const renamedFolders = sortFolders(
+        folders.map((folder) =>
+          folder === sourcePrefix
+            ? targetPrefix
+            : folder.startsWith(prefixWithSlash)
+              ? `${targetPrefix}/${folder.slice(prefixWithSlash.length)}`
+              : folder
+        )
+      );
+
+      setFiles(sortFiles(renamedFiles));
+      setFolders(renamedFolders);
+      setOpenFiles((prev) =>
+        prev.map((name) =>
+          name.startsWith(prefixWithSlash)
+            ? `${targetPrefix}/${name.slice(prefixWithSlash.length)}`
+            : name
+        )
+      );
+      if (activeFile?.startsWith(prefixWithSlash)) {
+        setActiveFile(`${targetPrefix}/${activeFile.slice(prefixWithSlash.length)}`);
+      }
+
+      void (async () => {
+        const filesToRename = files.filter((file) => file.name.startsWith(prefixWithSlash));
+        for (const file of filesToRename) {
+          await del(IDB_PREFIX + file.name);
+        }
+        for (const file of filesToRename) {
+          await persistFile({
+            ...file,
+            name: `${targetPrefix}/${file.name.slice(prefixWithSlash.length)}`,
+          });
+        }
+        await persistFolders(renamedFolders);
+      })();
+    },
+    [activeFile, files, folders, persistFile, persistFolders]
   );
 
   const deleteFile = useCallback(
@@ -162,17 +328,57 @@ export function FileProvider({ children }: { children: ReactNode }) {
           return remaining[0]?.name ?? null;
         });
       }
-      del(IDB_PREFIX + name);
+      void del(IDB_PREFIX + name);
     },
     [files, activeFile]
   );
 
+  const deleteFolder = useCallback(
+    (path: string) => {
+      const normalizedPath = normalizePath(path);
+      if (!normalizedPath) return;
+      const prefixWithSlash = `${normalizedPath}/`;
+      const remainingFiles = files.filter(
+        (file) => file.name !== normalizedPath && !file.name.startsWith(prefixWithSlash)
+      );
+      const remainingFolders = folders.filter(
+        (folder) => folder !== normalizedPath && !folder.startsWith(prefixWithSlash)
+      );
+
+      setFiles(remainingFiles);
+      setFolders(remainingFolders);
+      setOpenFiles((prev) =>
+        prev.filter((name) => name !== normalizedPath && !name.startsWith(prefixWithSlash))
+      );
+      if (activeFile === normalizedPath || activeFile?.startsWith(prefixWithSlash)) {
+        setActiveFile(remainingFiles[0]?.name ?? null);
+      }
+
+      void (async () => {
+        const removedFiles = files.filter(
+          (file) => file.name !== normalizedPath && file.name.startsWith(prefixWithSlash)
+        );
+        for (const file of removedFiles) {
+          await del(IDB_PREFIX + file.name);
+        }
+        await persistFolders(remainingFolders);
+      })();
+    },
+    [activeFile, files, folders, persistFolders]
+  );
+
   const importFiles = useCallback(
-    (incomingFiles: VFSFile[]) => {
+    (incomingFiles: VFSFile[], incomingFolders: string[] = []) => {
       if (incomingFiles.length === 0) return;
 
       const uniqueIncoming = Array.from(
-        new Map(incomingFiles.map((file) => [file.name, file])).values()
+        new Map(
+          incomingFiles.map((file) => [normalizePath(file.name), { ...file, name: normalizePath(file.name) }])
+        ).values()
+      );
+      const nextFolders = mergeFolders(
+        folders,
+        [...incomingFolders, ...uniqueIncoming.flatMap((file) => getAncestorFolders(file.name))]
       );
 
       setFiles((prev) => {
@@ -180,30 +386,41 @@ export function FileProvider({ children }: { children: ReactNode }) {
 
         uniqueIncoming.forEach((file) => {
           merged.set(file.name, file);
-          void persistFile(file.name, file.content);
+          void persistFile(file);
         });
 
-        return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name));
+        return sortFiles(Array.from(merged.values()));
       });
 
-      setOpenFiles((prev) => Array.from(new Set([...prev, ...uniqueIncoming.map((file) => file.name)])));
-      setActiveFile(uniqueIncoming[0]?.name ?? null);
+      setFolders(nextFolders);
+      void persistFolders(nextFolders);
     },
-    [persistFile]
+    [folders, persistFile, persistFolders]
   );
 
   const updateFileContent = useCallback(
     (name: string, content: string) => {
       setFiles((prev) =>
-        prev.map((f) => (f.name === name ? { ...f, content } : f))
+        prev.map((f) => (f.name === name && f.kind === "text" ? { ...f, content } : f))
       );
-      persistFile(name, content);
+      const currentFile = files.find((file) => file.name === name);
+      if (currentFile && currentFile.kind === "text") {
+        void persistFile({ ...currentFile, content });
+      }
     },
-    [persistFile]
+    [files, persistFile]
+  );
+
+  const getFile = useCallback(
+    (name: string) => files.find((file) => file.name === name),
+    [files]
   );
 
   const getFileContent = useCallback(
-    (name: string) => files.find((f) => f.name === name)?.content,
+    (name: string) => {
+      const file = files.find((entry) => entry.name === name);
+      return typeof file?.content === "string" ? file.content : undefined;
+    },
     [files]
   );
 
@@ -236,16 +453,21 @@ export function FileProvider({ children }: { children: ReactNode }) {
     <FileContext.Provider
       value={{
         files,
+        folders,
         activeFile,
         openFiles,
         setActiveFile,
         openFile,
         closeFile,
         createFile,
+        createFolder,
         renameFile,
+        renameFolder,
         deleteFile,
+        deleteFolder,
         importFiles,
         updateFileContent,
+        getFile,
         getFileContent,
       }}
     >

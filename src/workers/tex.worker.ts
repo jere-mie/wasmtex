@@ -1,8 +1,9 @@
 import { BusyTexRunner } from "texlyre-busytex";
+import type { VFSFile } from "@/lib/project-files";
 
 export interface CompileRequest {
   type: "compile";
-  files: { name: string; content: string }[];
+  files: Pick<VFSFile, "name" | "content">[];
   mainFile: string;
 }
 
@@ -77,7 +78,7 @@ function extractErrors(log: string, exitCode?: number) {
 }
 
 async function compileWithFallback(
-  files: { name: string; content: string }[],
+  files: Pick<VFSFile, "name" | "content">[],
   mainFile: string
 ) {
   let lastResult: Awaited<ReturnType<typeof runner.compile>> | null = null;

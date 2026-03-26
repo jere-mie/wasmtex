@@ -9,6 +9,10 @@ import { CompileConsole } from "@/components/CompileConsole";
 import { useFiles } from "@/context/FileContext";
 import type { CompileResponse, CompileStatusMessage } from "@/workers/tex.worker";
 import { cn } from "@/lib/utils";
+import {
+  collectProjectImportFromDataTransfer,
+  hasFileDrag,
+} from "@/lib/project-files";
 import { FolderOpen, FileText, Eye } from "lucide-react";
 
 const HANDLE_SIZE = 4;
@@ -21,6 +25,8 @@ const MIN_CONSOLE_HEIGHT = 120;
 const DEFAULT_SIDEBAR_WIDTH = 240;
 const DEFAULT_PREVIEW_WIDTH = 540;
 const DEFAULT_CONSOLE_HEIGHT = 210;
+const AUTO_COMPILE_STORAGE_KEY = "wasmtex:auto-compile";
+const AUTO_COMPILE_DELAY_MS = 700;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -79,9 +85,14 @@ function ResizeHandle({
 }
 
 function App() {
-  const { files, activeFile } = useFiles();
+  const { files, activeFile, importFiles } = useFiles();
   const [compileResult, setCompileResult] = useState<CompileResponse | null>(null);
   const [isCompiling, setIsCompiling] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [autoCompile, setAutoCompile] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(AUTO_COMPILE_STORAGE_KEY) === "true";
+  });
   const [compilePhase, setCompilePhase] = useState<CompileStatusMessage["phase"] | null>(null);
   const [compileStartTime, setCompileStartTime] = useState<number | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
@@ -89,9 +100,21 @@ function App() {
   const [consoleHeight, setConsoleHeight] = useState(DEFAULT_CONSOLE_HEIGHT);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   const [mobileTab, setMobileTab] = useState<"files" | "editor" | "preview">("editor");
+  const [isImportDragActive, setIsImportDragActive] = useState(false);
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const rightColumnRef = useRef<HTMLDivElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
+  const dragDepthRef = useRef(0);
+  const lastCompileVersionRef = useRef<string | null>(null);
+
+  const projectVersion = files
+    .map((file) => {
+      const contentToken = typeof file.content === "string"
+        ? file.content
+        : `${file.mimeType ?? "application/octet-stream"}:${file.content.byteLength}`;
+      return `${file.name}:${contentToken}`;
+    })
+    .join("\u001f");
 
   const handleCompileResult = useCallback((result: CompileResponse) => {
     setCompileResult(result);
@@ -112,6 +135,7 @@ function App() {
   const handleCompile = useCallback(() => {
     if (isCompiling) return;
 
+    lastCompileVersionRef.current = projectVersion;
     setIsCompiling(true);
     setCompileStartTime(Date.now());
 
@@ -142,7 +166,38 @@ function App() {
       files: files.map((file) => ({ name: file.name, content: file.content })),
       mainFile,
     });
-  }, [activeFile, files, handleCompileResult, isCompiling]);
+  }, [activeFile, files, handleCompileResult, isCompiling, projectVersion]);
+
+  const notifyProjectImport = useCallback((fileCount: number, folderCount: number) => {
+    toast.success("Project imported", {
+      description:
+        folderCount > 0
+          ? `${fileCount} file${fileCount === 1 ? "" : "s"} across ${folderCount} folder${folderCount === 1 ? "" : "s"}.`
+          : `${fileCount} file${fileCount === 1 ? "" : "s"} added to the project.`,
+    });
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(AUTO_COMPILE_STORAGE_KEY, autoCompile ? "true" : "false");
+  }, [autoCompile]);
+
+  useEffect(() => {
+    if (!autoCompile || isCompiling || files.length === 0) {
+      return;
+    }
+
+    if (projectVersion === lastCompileVersionRef.current) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      handleCompile();
+    }, AUTO_COMPILE_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [autoCompile, files.length, handleCompile, isCompiling, projectVersion]);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 767px)");
@@ -159,6 +214,72 @@ function App() {
       workerRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const resetDragState = () => {
+      dragDepthRef.current = 0;
+      setIsImportDragActive(false);
+    };
+
+    const handleDragEnter = (event: DragEvent) => {
+      if (!hasFileDrag(event.dataTransfer)) return;
+      event.preventDefault();
+      dragDepthRef.current += 1;
+      setIsImportDragActive(true);
+    };
+
+    const handleDragOver = (event: DragEvent) => {
+      if (!hasFileDrag(event.dataTransfer)) return;
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "copy";
+      }
+      setIsImportDragActive(true);
+    };
+
+    const handleDragLeave = (event: DragEvent) => {
+      if (!hasFileDrag(event.dataTransfer)) return;
+      event.preventDefault();
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) {
+        setIsImportDragActive(false);
+      }
+    };
+
+    const handleDrop = async (event: DragEvent) => {
+      if (!hasFileDrag(event.dataTransfer)) return;
+      event.preventDefault();
+      resetDragState();
+
+      try {
+        const importedProject = await collectProjectImportFromDataTransfer(event.dataTransfer as DataTransfer);
+        if (importedProject.files.length === 0) {
+          return;
+        }
+
+        importFiles(importedProject.files, importedProject.folders);
+        notifyProjectImport(importedProject.files.length, importedProject.folders.length);
+      } catch (error) {
+        toast.error("Import failed", {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+
+    window.addEventListener("dragenter", handleDragEnter);
+    window.addEventListener("dragover", handleDragOver);
+    window.addEventListener("dragleave", handleDragLeave);
+    window.addEventListener("drop", handleDrop);
+    window.addEventListener("blur", resetDragState);
+
+    return () => {
+      window.removeEventListener("dragenter", handleDragEnter);
+      window.removeEventListener("dragover", handleDragOver);
+      window.removeEventListener("dragleave", handleDragLeave);
+      window.removeEventListener("drop", handleDrop);
+      window.removeEventListener("blur", resetDragState);
+    };
+  }, [importFiles, notifyProjectImport]);
 
   useEffect(() => {
     const clampLayout = () => {
@@ -302,10 +423,14 @@ function App() {
   ];
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col noise-bg">
+    <div className="relative flex h-full min-h-0 min-w-0 flex-col noise-bg">
       <Toolbar
         onCompile={handleCompile}
         isCompiling={isCompiling}
+        autoCompile={autoCompile}
+        onAutoCompileChange={setAutoCompile}
+        isSettingsOpen={isSettingsOpen}
+        onSettingsOpenChange={setIsSettingsOpen}
       />
 
       {isMobile ? (
@@ -392,6 +517,17 @@ function App() {
             <div className="min-h-0 shrink-0" style={{ height: consoleHeight }}>
               <CompileConsole compileResult={compileResult} isCompiling={isCompiling} compilePhase={compilePhase} compileStartTime={compileStartTime} />
             </div>
+          </div>
+        </div>
+      )}
+
+      {isImportDragActive && (
+        <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-ink-950/70 backdrop-blur-sm">
+          <div className="rounded-2xl border border-amber-glow/40 bg-ink-900/95 px-6 py-5 text-center shadow-2xl shadow-black/40">
+            <p className="font-display text-xl text-amber-glow">Drop files or folders to import</p>
+            <p className="mt-2 text-sm text-ink-300">
+              Mixed selections are supported, including images and nested directories.
+            </p>
           </div>
         </div>
       )}

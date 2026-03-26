@@ -1,7 +1,12 @@
-import { useRef, useCallback, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { useFiles } from "@/context/FileContext";
+import {
+  getVFSFileSize,
+  isImageFile,
+  isTextFile,
+} from "@/lib/project-files";
 
 // Store Monaco models per file to preserve undo history
 const modelCache = new Map<string, editor.ITextModel>();
@@ -11,14 +16,31 @@ interface MonacoEditorProps {
 }
 
 export function MonacoEditor({ onCompile }: MonacoEditorProps) {
-  const { activeFile, getFileContent, updateFileContent } = useFiles();
+  const { activeFile, getFile, getFileContent, updateFileContent } = useFiles();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const onCompileRef = useRef(onCompile);
   useEffect(() => { onCompileRef.current = onCompile; }, [onCompile]);
 
-  const handleMount: OnMount = useCallback(
-    (editor, monaco) => {
-      editorRef.current = editor;
+  const activeEntry = activeFile ? getFile(activeFile) : undefined;
+  const isEditableTextFile = activeEntry ? isTextFile(activeEntry) : false;
+
+  function setModelForFile(
+    editor: editor.IStandaloneCodeEditor,
+    monaco: typeof import("monaco-editor"),
+    fileName: string,
+    content: string
+  ) {
+    let model = modelCache.get(fileName);
+    if (!model || model.isDisposed()) {
+      const uri = monaco.Uri.parse(`file:///${fileName}`);
+      model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(content, "latex", uri);
+      modelCache.set(fileName, model);
+    }
+    editor.setModel(model);
+  }
+
+  const handleMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor;
 
       // Override Ctrl/Cmd+Enter to compile instead of inserting a new line
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
@@ -80,7 +102,7 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
               [/%.*$/, "comment"],
               [/\\[a-zA-Z@]+/, "keyword"],
               [/[{}]/, "delimiter.curly"],
-              [/[\[\]]/, "delimiter.square"],
+              [/[[\]]/, "delimiter.square"],
               [/\$\$?/, "delimiter.math"],
               [/[&]/, "delimiter"],
               [/[0-9]+/, "number"],
@@ -90,36 +112,16 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
       }
 
       // Set model for active file
-      if (activeFile) {
-        setModelForFile(editor, monaco, activeFile, getFileContent(activeFile) ?? "");
-      }
-    },
-    [activeFile, getFileContent]
-  );
-
-  const setModelForFile = (
-    editor: editor.IStandaloneCodeEditor,
-    monaco: typeof import("monaco-editor"),
-    fileName: string,
-    content: string
-  ) => {
-    let model = modelCache.get(fileName);
-    if (!model || model.isDisposed()) {
-      const uri = monaco.Uri.parse(`file:///${fileName}`);
-      model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(content, "latex", uri);
-      modelCache.set(fileName, model);
+    if (activeFile && isEditableTextFile) {
+      setModelForFile(editor, monaco, activeFile, getFileContent(activeFile) ?? "");
     }
-    editor.setModel(model);
   };
 
-  const handleChange = useCallback(
-    (value: string | undefined) => {
-      if (activeFile && value !== undefined) {
-        updateFileContent(activeFile, value);
-      }
-    },
-    [activeFile, updateFileContent]
-  );
+  const handleChange = (value: string | undefined) => {
+    if (activeFile && value !== undefined && isEditableTextFile) {
+      updateFileContent(activeFile, value);
+    }
+  };
 
   if (!activeFile) {
     return (
@@ -127,6 +129,28 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
         <div className="text-center space-y-3">
           <div className="font-display text-4xl text-ink-600 select-none">WasmTeX</div>
           <p className="text-ink-500 text-sm">Open a file to start editing</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!activeEntry) {
+    return null;
+  }
+
+  if (!isEditableTextFile) {
+    return (
+      <div className="flex h-full items-center justify-center bg-ink-900">
+        <div className="max-w-md space-y-3 px-6 text-center">
+          <div className="font-display text-3xl text-ink-500 select-none">{activeEntry.name.split("/").pop()}</div>
+          <p className="text-sm text-ink-400">
+            {isImageFile(activeEntry)
+              ? "This image asset is stored in the project and available to the compiler and downloads, but it is not editable in the text editor."
+              : "This file is stored as binary data and is available to the compiler and downloads, but it cannot be edited in the text editor."}
+          </p>
+          <p className="text-xs font-mono text-ink-500">
+            {activeEntry.mimeType ?? "application/octet-stream"} • {getVFSFileSize(activeEntry).toLocaleString()} bytes
+          </p>
         </div>
       </div>
     );

@@ -1,4 +1,6 @@
-// Minimal uncompressed (store) ZIP builder - no dependencies needed for text files.
+// Minimal uncompressed (store) ZIP builder - no dependencies needed.
+
+import { getVFSFileBytes } from "@/lib/project-files";
 
 const crcTable = (() => {
   const t = new Uint32Array(256);
@@ -21,7 +23,7 @@ function u32(v: DataView, o: number, n: number) { v.setUint32(o, n, true); }
 
 export interface ZipEntry {
   name: string;
-  content: string;
+  content: string | Uint8Array;
 }
 
 export function buildZip(entries: ZipEntry[]): Uint8Array {
@@ -32,7 +34,11 @@ export function buildZip(entries: ZipEntry[]): Uint8Array {
 
   for (const entry of entries) {
     const name = enc.encode(entry.name);
-    const data = enc.encode(entry.content);
+    const data = getVFSFileBytes({
+      name: entry.name,
+      content: entry.content,
+      kind: typeof entry.content === "string" ? "text" : "binary",
+    });
     const crc = crc32(data);
     const hdr = new Uint8Array(30 + name.length);
     const dv = new DataView(hdr.buffer);
