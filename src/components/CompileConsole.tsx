@@ -46,7 +46,7 @@ export function CompileConsole({ compileResult, isCompiling, compilePhase, compi
     if (!isCompiling) return 0;
     if (!isInitializing) return 100; // compiling phase = done initializing
     // logistic-ish curve: fast early, slow late, caps at 95
-    const t = elapsed / 90; // normalise to ~90 s target
+    const t = elapsed / 180; // normalise to ~3 min midpoint (6 min max)
     return Math.min(95, 95 * (1 - Math.exp(-3 * t)));
   })();
 
@@ -113,8 +113,8 @@ export function CompileConsole({ compileResult, isCompiling, compilePhase, compi
               </div>
               <p className="text-ink-400 text-[11px] leading-relaxed">
                 The TeX runtime (~430 MB) is being fetched from the server. This only happens
-                once - subsequent compiles will be fast. Please wait, this may take up to a
-                minute depending on your connection.
+                once - subsequent compiles will be fast. Please wait, this may take several
+                minutes on slower connections.
               </p>
             </div>
           )}
