@@ -47,6 +47,9 @@ cd wasmtex
 # Install dependencies
 npm install
 
+# Download the BusyTeX runtime assets used for in-browser PDF generation
+npm run download:tex-assets
+
 # Start development server
 npm run dev
 
@@ -73,8 +76,15 @@ npm run build
 - **Full IDE Layout** - Resizable 3-panel design: file explorer, tabbed editor, and PDF preview with console
 - **Monaco Editor** - VS Code's editor engine with custom LaTeX syntax highlighting and a bespoke dark theme
 - **Virtual File System** - Create, rename, and delete `.tex` files with automatic IndexedDB persistence
+- **BusyTeX PDF Compilation** - PdfLaTeX runs in the browser via WebAssembly and renders a real PDF preview
 - **Web Worker Compilation** - TeX runs off the main thread for a responsive editing experience
 - **Zero Backend** - Everything happens client-side. Your documents never leave your browser
+
+## Runtime Assets
+
+The TeX engine is powered by `texlyre-busytex` and requires large WASM/data assets that are not bundled into the app source automatically.
+
+Run `npm run download:tex-assets` after installing dependencies to place the runtime files under `public/core/busytex`.
 
 ## License
 

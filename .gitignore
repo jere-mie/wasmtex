@@ -16,6 +16,9 @@ dist
 dist-ssr
 *.local
 
+# TeX runtime assets — downloaded at build time via `npm run download:tex-assets`
+public/core/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -30,11 +30,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build
-
       - name: Setup Pages
         uses: actions/configure-pages@v5
+        id: pages
+
+      - name: Cache TeX assets
+        uses: actions/cache@v4
+        id: tex-cache
+        with:
+          path: public/core
+          key: tex-assets-${{ hashFiles('package-lock.json') }}
+
+      - name: Download TeX assets
+        if: steps.tex-cache.outputs.cache-hit != 'true'
+        run: npm run download:tex-assets
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

@@ -1,8 +1,4 @@
-// TeX compilation Web Worker
-// This worker handles LaTeX compilation off the main thread.
-// Currently uses a mock compilation since SwiftLaTeX/BusyTeX WASM
-// binaries need to be loaded separately. The architecture is ready
-// for real TeX engine integration.
+import { BusyTexRunner } from "texlyre-busytex";
 
 export interface CompileRequest {
   type: "compile";
@@ -16,6 +12,99 @@ export interface CompileResponse {
   pdf?: Uint8Array;
   log: string;
   errors: string[];
+  exitCode?: number;
+}
+
+const runner = new BusyTexRunner({
+  busytexBasePath: "/core/busytex",
+  verbose: false,
+});
+
+const DRIVER_ORDER = [
+  "xetex_bibtex8_dvipdfmx",
+  "luahbtex_bibtex8",
+  "pdftex_bibtex8",
+] as const;
+
+let runnerReady: Promise<void> | null = null;
+
+function ensureRunnerReady() {
+  if (!runnerReady) {
+    runnerReady = runner.initialize(true).catch((error) => {
+      runnerReady = null;
+      throw error;
+    });
+  }
+
+  return runnerReady;
+}
+
+function extractErrors(log: string, exitCode?: number) {
+  const lines = log
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const matches = Array.from(
+    new Set(
+      lines.filter((line) => {
+        const lower = line.toLowerCase();
+        return (
+          line.startsWith("!") ||
+          lower.includes("fatal error") ||
+          lower.includes("undefined control sequence") ||
+          lower.includes("no output pdf file produced") ||
+          lower.includes("emergency stop")
+        );
+      })
+    )
+  );
+
+  if (matches.length > 0) {
+    return matches;
+  }
+
+  if (exitCode !== undefined) {
+    return [`Compilation failed with exit code ${exitCode}.`];
+  }
+
+  return ["Compilation failed."];
+}
+
+async function compileWithFallback(
+  files: { name: string; content: string }[],
+  mainFile: string
+) {
+  let lastResult: Awaited<ReturnType<typeof runner.compile>> | null = null;
+
+  for (const driver of DRIVER_ORDER) {
+    const result = await runner.compile(
+      files.map((file) => ({
+        path: file.name,
+        content: file.content,
+      })),
+      mainFile,
+      files.some((file) => file.name.endsWith(".bib")) || null,
+      "info",
+      driver,
+      ["/core/busytex/texlive-extra.js"]
+    );
+
+    if (result.success) {
+      if (driver === DRIVER_ORDER[0]) {
+        return result;
+      }
+
+      return {
+        ...result,
+        log: [`Engine selected: ${driver}`, "", result.log].join("\n"),
+      };
+    }
+
+    lastResult = result;
+  }
+
+  return lastResult;
 }
 
 self.onmessage = async (event: MessageEvent<CompileRequest>) => {
@@ -23,10 +112,7 @@ self.onmessage = async (event: MessageEvent<CompileRequest>) => {
 
   if (type !== "compile") return;
 
-  const startTime = performance.now();
-
   try {
-    // Find the main file
     const main = files.find((f) => f.name === mainFile);
     if (!main) {
       const response: CompileResponse = {
@@ -39,77 +125,29 @@ self.onmessage = async (event: MessageEvent<CompileRequest>) => {
       return;
     }
 
-    // Basic LaTeX validation
-    const errors: string[] = [];
-    const content = main.content;
+    await ensureRunnerReady();
 
-    if (!content.includes("\\documentclass")) {
-      errors.push("Missing \\documentclass declaration");
-    }
-    if (!content.includes("\\begin{document}")) {
-      errors.push("Missing \\begin{document}");
-    }
-    if (!content.includes("\\end{document}")) {
-      errors.push("Missing \\end{document}");
+    const result = await compileWithFallback(files, mainFile);
+
+    if (!result) {
+      throw new Error("Compilation did not return a result.");
     }
 
-    // Check for unmatched braces (basic check)
-    let braceCount = 0;
-    for (const char of content) {
-      if (char === "{") braceCount++;
-      if (char === "}") braceCount--;
-      if (braceCount < 0) {
-        errors.push("Unmatched closing brace '}'");
-        break;
-      }
-    }
-    if (braceCount > 0) {
-      errors.push(`${braceCount} unclosed brace(s) '{'`);
-    }
+    const pdf = result.pdf ? new Uint8Array(result.pdf) : undefined;
+    const response: CompileResponse = {
+      type: "compile-result",
+      success: result.success,
+      pdf,
+      log: result.log,
+      errors: result.success ? [] : extractErrors(result.log, result.exitCode),
+      exitCode: result.exitCode,
+    };
 
-    const elapsed = (performance.now() - startTime).toFixed(1);
-
-    if (errors.length > 0) {
-      const response: CompileResponse = {
-        type: "compile-result",
-        success: false,
-        log: [
-          `This is WasmTeX, Version 0.1.0`,
-          `(${mainFile}`,
-          ...errors.map((e) => `! LaTeX Error: ${e}`),
-          ``,
-          `Compilation failed with ${errors.length} error(s) in ${elapsed}ms.`,
-          ``,
-          `Note: Full TeX compilation requires loading the SwiftLaTeX WASM engine.`,
-          `The editor is fully functional - connect a WASM TeX binary to enable PDF output.`,
-        ].join("\n"),
-        errors,
-      };
-      self.postMessage(response);
+    if (pdf) {
+      self.postMessage(response, { transfer: [pdf.buffer] });
       return;
     }
 
-    // Successful validation (no real PDF without WASM engine)
-    const response: CompileResponse = {
-      type: "compile-result",
-      success: true,
-      log: [
-        `This is WasmTeX, Version 0.1.0`,
-        `(${mainFile}`,
-        `LaTeX2e <2024-06-01>`,
-        ``,
-        `Processing ${files.length} file(s)...`,
-        ...files.map((f) => `  ${f.name} (${f.content.length} bytes)`),
-        ``,
-        `Document structure validated successfully.`,
-        `Compilation completed in ${elapsed}ms.`,
-        ``,
-        `Note: PDF generation requires the SwiftLaTeX WASM engine.`,
-        `To enable full compilation, load a TeX WASM binary into this worker.`,
-        `Output written on ${mainFile.replace(".tex", ".pdf")}`,
-      ].join("\n"),
-      errors: [],
-    };
     self.postMessage(response);
   } catch (err) {
     const response: CompileResponse = {

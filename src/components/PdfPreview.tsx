@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { CompileResponse } from "@/workers/tex.worker";
 import { FileText } from "lucide-react";
 
@@ -6,14 +7,30 @@ interface PdfPreviewProps {
 }
 
 export function PdfPreview({ compileResult }: PdfPreviewProps) {
-  // If we have a PDF blob, display it
-  if (compileResult?.success && compileResult.pdf) {
-    const blob = new Blob([compileResult.pdf as BlobPart], { type: "application/pdf" });
-    const url = URL.createObjectURL(blob);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!compileResult?.success || !compileResult.pdf) {
+      setPdfUrl(null);
+      return;
+    }
+
+    const url = URL.createObjectURL(
+      new Blob([compileResult.pdf as BlobPart], { type: "application/pdf" })
+    );
+
+    setPdfUrl(url);
+
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [compileResult]);
+
+  if (pdfUrl) {
     return (
-      <div className="flex-1 bg-ink-950">
+      <div className="flex h-full min-h-0 flex-1 bg-ink-950">
         <iframe
-          src={url}
+          src={`${pdfUrl}#view=FitH`}
           className="w-full h-full border-0"
           title="PDF Preview"
         />
@@ -23,7 +40,7 @@ export function PdfPreview({ compileResult }: PdfPreviewProps) {
 
   // Empty state
   return (
-    <div className="flex-1 flex items-center justify-center bg-ink-950">
+    <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-ink-950">
       <div className="text-center space-y-4 px-8 max-w-xs">
         {/* Decorative element */}
         <div className="mx-auto w-16 h-20 rounded-sm border-2 border-ink-700 border-dashed flex items-center justify-center relative">

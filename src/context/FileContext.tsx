@@ -9,7 +9,6 @@ import {
 import { get, set, del, keys } from "idb-keyval";
 
 const DEFAULT_MAIN_TEX = `\\documentclass{article}
-\\usepackage[utf8]{inputenc}
 \\usepackage{amsmath}
 \\usepackage{geometry}
 \\geometry{a4paper, margin=1in}
@@ -66,6 +65,7 @@ interface FileContextType {
   createFile: (name: string, content?: string) => void;
   renameFile: (oldName: string, newName: string) => void;
   deleteFile: (name: string) => void;
+  importFiles: (incomingFiles: VFSFile[]) => void;
   updateFileContent: (name: string, content: string) => void;
   getFileContent: (name: string) => string | undefined;
 }
@@ -167,6 +167,31 @@ export function FileProvider({ children }: { children: ReactNode }) {
     [files, activeFile]
   );
 
+  const importFiles = useCallback(
+    (incomingFiles: VFSFile[]) => {
+      if (incomingFiles.length === 0) return;
+
+      const uniqueIncoming = Array.from(
+        new Map(incomingFiles.map((file) => [file.name, file])).values()
+      );
+
+      setFiles((prev) => {
+        const merged = new Map(prev.map((file) => [file.name, file]));
+
+        uniqueIncoming.forEach((file) => {
+          merged.set(file.name, file);
+          void persistFile(file.name, file.content);
+        });
+
+        return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name));
+      });
+
+      setOpenFiles((prev) => Array.from(new Set([...prev, ...uniqueIncoming.map((file) => file.name)])));
+      setActiveFile(uniqueIncoming[0]?.name ?? null);
+    },
+    [persistFile]
+  );
+
   const updateFileContent = useCallback(
     (name: string, content: string) => {
       setFiles((prev) =>
@@ -219,6 +244,7 @@ export function FileProvider({ children }: { children: ReactNode }) {
         createFile,
         renameFile,
         deleteFile,
+        importFiles,
         updateFileContent,
         getFileContent,
       }}

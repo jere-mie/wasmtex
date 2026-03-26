@@ -1,24 +1,99 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Toaster, toast } from "sonner";
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@/components/ui/resizable";
 import { Toolbar } from "@/components/Toolbar";
 import { FileExplorer } from "@/components/FileExplorer";
 import { EditorTabs } from "@/components/EditorTabs";
 import { MonacoEditor } from "@/components/MonacoEditor";
 import { PdfPreview } from "@/components/PdfPreview";
 import { CompileConsole } from "@/components/CompileConsole";
+import { useFiles } from "@/context/FileContext";
 import type { CompileResponse } from "@/workers/tex.worker";
+import { cn } from "@/lib/utils";
+import { FolderOpen, FileText, Eye } from "lucide-react";
+
+const HANDLE_SIZE = 4;
+const MIN_SIDEBAR_WIDTH = 88;
+const MAX_SIDEBAR_WIDTH = 420;
+const MIN_EDITOR_WIDTH = 320;
+const MIN_PREVIEW_WIDTH = 320;
+const MIN_PREVIEW_HEIGHT = 180;
+const MIN_CONSOLE_HEIGHT = 120;
+const DEFAULT_SIDEBAR_WIDTH = 240;
+const DEFAULT_PREVIEW_WIDTH = 540;
+const DEFAULT_CONSOLE_HEIGHT = 210;
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function ResizeHandle({
+  orientation,
+  onPointerDown,
+}: {
+  orientation: "horizontal" | "vertical";
+  onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
+}) {
+  return (
+    <div
+      role="separator"
+      aria-orientation={orientation === "horizontal" ? "vertical" : "horizontal"}
+      onPointerDown={onPointerDown}
+      className={cn(
+        "group relative z-10 shrink-0 touch-none select-none",
+        orientation === "horizontal"
+          ? "h-full cursor-col-resize"
+          : "w-full cursor-row-resize"
+      )}
+      style={{
+        width: orientation === "horizontal" ? `${HANDLE_SIZE}px` : "100%",
+        height: orientation === "vertical" ? `${HANDLE_SIZE}px` : "100%",
+      }}
+    >
+      <div
+        className={cn(
+          "absolute bg-ink-700/90 transition-colors group-hover:bg-amber-glow/50",
+          orientation === "horizontal"
+            ? "left-1/2 top-0 h-full w-px -translate-x-1/2"
+            : "top-1/2 left-0 h-px w-full -translate-y-1/2"
+        )}
+      />
+      <div
+        className={cn(
+          "pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-sm border border-ink-600 bg-ink-800 shadow-[0_0_0_1px_rgba(8,6,10,0.55)] transition-colors group-hover:border-amber-glow/60 group-hover:bg-ink-750",
+          orientation === "horizontal" ? "h-5 w-3" : "h-3 w-5"
+        )}
+      >
+        <div
+          className={cn(
+            "grid gap-[2px]",
+            orientation === "horizontal" ? "grid-cols-1" : "grid-flow-col"
+          )}
+        >
+          <span className="h-[2px] w-[2px] rounded-full bg-ink-400" />
+          <span className="h-[2px] w-[2px] rounded-full bg-ink-400" />
+          <span className="h-[2px] w-[2px] rounded-full bg-ink-400" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function App() {
+  const { files, activeFile } = useFiles();
   const [compileResult, setCompileResult] = useState<CompileResponse | null>(null);
   const [isCompiling, setIsCompiling] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
+  const [previewWidth, setPreviewWidth] = useState(DEFAULT_PREVIEW_WIDTH);
+  const [consoleHeight, setConsoleHeight] = useState(DEFAULT_CONSOLE_HEIGHT);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [mobileTab, setMobileTab] = useState<"files" | "editor" | "preview">("editor");
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const rightColumnRef = useRef<HTMLDivElement | null>(null);
+  const workerRef = useRef<Worker | null>(null);
 
   const handleCompileResult = useCallback((result: CompileResponse) => {
     setCompileResult(result);
+    setIsCompiling(false);
     if (result.success) {
       toast.success("Compilation successful", {
         description: "Document built without errors.",
@@ -30,47 +105,287 @@ function App() {
     }
   }, []);
 
+  const handleCompile = useCallback(() => {
+    if (isCompiling) return;
+
+    setIsCompiling(true);
+
+    if (!workerRef.current) {
+      workerRef.current = new Worker(
+        new URL("@/workers/tex.worker.ts", import.meta.url),
+        { type: "module" }
+      );
+    }
+
+    const worker = workerRef.current;
+    const mainFile =
+      activeFile ??
+      files.find((file) => file.name === "main.tex")?.name ??
+      files[0]?.name ??
+      "main.tex";
+
+    worker.onmessage = (event: MessageEvent<CompileResponse>) => {
+      handleCompileResult(event.data);
+    };
+
+    worker.postMessage({
+      type: "compile",
+      files: files.map((file) => ({ name: file.name, content: file.content })),
+      mainFile,
+    });
+  }, [activeFile, files, handleCompileResult, isCompiling]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  useEffect(() => {
+    const worker = workerRef.current;
+
+    return () => {
+      worker?.terminate();
+      workerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const clampLayout = () => {
+      const layoutElement = layoutRef.current;
+      const rightColumnElement = rightColumnRef.current;
+
+      if (!layoutElement || !rightColumnElement) return;
+
+      const totalWidth = layoutElement.clientWidth;
+      const maxSidebarWidth = Math.min(
+        MAX_SIDEBAR_WIDTH,
+        totalWidth - MIN_EDITOR_WIDTH - previewWidth - HANDLE_SIZE * 2
+      );
+      const nextSidebarWidth = clamp(sidebarWidth, MIN_SIDEBAR_WIDTH, maxSidebarWidth);
+
+      const maxPreviewWidth = totalWidth - nextSidebarWidth - MIN_EDITOR_WIDTH - HANDLE_SIZE * 2;
+      const nextPreviewWidth = clamp(previewWidth, MIN_PREVIEW_WIDTH, maxPreviewWidth);
+
+      if (nextSidebarWidth !== sidebarWidth) {
+        setSidebarWidth(nextSidebarWidth);
+      }
+
+      if (nextPreviewWidth !== previewWidth) {
+        setPreviewWidth(nextPreviewWidth);
+      }
+
+      const rightColumnHeight = rightColumnElement.clientHeight;
+      const maxConsoleHeight = rightColumnHeight - MIN_PREVIEW_HEIGHT - HANDLE_SIZE;
+      const nextConsoleHeight = clamp(consoleHeight, MIN_CONSOLE_HEIGHT, maxConsoleHeight);
+
+      if (nextConsoleHeight !== consoleHeight) {
+        setConsoleHeight(nextConsoleHeight);
+      }
+    };
+
+    clampLayout();
+    window.addEventListener("resize", clampLayout);
+    return () => window.removeEventListener("resize", clampLayout);
+  }, [consoleHeight, previewWidth, sidebarWidth]);
+
+  const beginHorizontalResize = useCallback(
+    (target: "sidebar" | "preview", event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+
+      const layoutElement = layoutRef.current;
+      if (!layoutElement) return;
+
+      const rect = layoutElement.getBoundingClientRect();
+      const startClientX = event.clientX;
+      const startSidebarWidth = sidebarWidth;
+      const startPreviewWidth = previewWidth;
+
+      const onPointerMove = (moveEvent: PointerEvent) => {
+        const totalWidth = rect.width;
+        const deltaX = moveEvent.clientX - startClientX;
+        const maxSidebarWidth = Math.min(
+          MAX_SIDEBAR_WIDTH,
+          totalWidth - MIN_EDITOR_WIDTH - MIN_PREVIEW_WIDTH - HANDLE_SIZE * 2
+        );
+        const maxPreviewWidth = totalWidth - MIN_EDITOR_WIDTH - MIN_SIDEBAR_WIDTH - HANDLE_SIZE * 2;
+
+        if (target === "sidebar") {
+          const nextSidebarWidth = clamp(
+            startSidebarWidth + deltaX,
+            MIN_SIDEBAR_WIDTH,
+            maxSidebarWidth
+          );
+          const nextPreviewWidth = clamp(
+            totalWidth - nextSidebarWidth - MIN_EDITOR_WIDTH - HANDLE_SIZE * 2,
+            MIN_PREVIEW_WIDTH,
+            MAX_SIDEBAR_WIDTH + totalWidth
+          );
+
+          setSidebarWidth(nextSidebarWidth);
+          setPreviewWidth(Math.min(startPreviewWidth, nextPreviewWidth));
+          return;
+        }
+
+        const nextPreviewWidth = clamp(
+          startPreviewWidth - deltaX,
+          MIN_PREVIEW_WIDTH,
+          maxPreviewWidth
+        );
+        const nextSidebarWidth = clamp(
+          totalWidth - nextPreviewWidth - MIN_EDITOR_WIDTH - HANDLE_SIZE * 2,
+          MIN_SIDEBAR_WIDTH,
+          MAX_SIDEBAR_WIDTH
+        );
+
+        setPreviewWidth(nextPreviewWidth);
+        setSidebarWidth(Math.min(startSidebarWidth, nextSidebarWidth));
+      };
+
+      const onPointerUp = () => {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+      };
+
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("pointermove", onPointerMove);
+      window.addEventListener("pointerup", onPointerUp);
+    },
+    [previewWidth, sidebarWidth]
+  );
+
+  const beginVerticalResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+
+    const rightColumnElement = rightColumnRef.current;
+    if (!rightColumnElement) return;
+
+    const rect = rightColumnElement.getBoundingClientRect();
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const maxConsoleHeight = rect.height - MIN_PREVIEW_HEIGHT - HANDLE_SIZE;
+      setConsoleHeight(
+        clamp(rect.bottom - moveEvent.clientY, MIN_CONSOLE_HEIGHT, maxConsoleHeight)
+      );
+    };
+
+    const onPointerUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  }, []);
+
+  const mobileTabItems = [
+    { id: "files" as const, label: "Files", icon: FolderOpen },
+    { id: "editor" as const, label: "Editor", icon: FileText },
+    { id: "preview" as const, label: "Preview", icon: Eye },
+  ];
+
   return (
-    <div className="h-full flex flex-col noise-bg">
+    <div className="flex h-full min-h-0 min-w-0 flex-col noise-bg">
       <Toolbar
-        onCompileResult={handleCompileResult}
+        onCompile={handleCompile}
         isCompiling={isCompiling}
-        setIsCompiling={setIsCompiling}
       />
 
-      <ResizablePanelGroup orientation="horizontal" className="flex-1">
-        {/* File Explorer */}
-        <ResizablePanel defaultSize={15} minSize={10} maxSize={30}>
-          <FileExplorer />
-        </ResizablePanel>
+      {isMobile ? (
+        /* ── Mobile layout: single panel + bottom tab bar ── */
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {mobileTab === "files" && (
+              <div className="h-full overflow-auto">
+                <FileExplorer />
+              </div>
+            )}
+            {mobileTab === "editor" && (
+              <div className="flex h-full min-h-0 flex-col">
+                <EditorTabs />
+                <div className="flex-1 min-h-0">
+                  <MonacoEditor onCompile={handleCompile} />
+                </div>
+              </div>
+            )}
+            {mobileTab === "preview" && (
+              <div className="flex h-full min-h-0 flex-col">
+                <div className="flex-1 min-h-0">
+                  <PdfPreview compileResult={compileResult} />
+                </div>
+                <div className="shrink-0" style={{ height: 180 }}>
+                  <CompileConsole compileResult={compileResult} isCompiling={isCompiling} />
+                </div>
+              </div>
+            )}
+          </div>
 
-        <ResizableHandle />
+          {/* Bottom tab bar */}
+          <nav className="flex shrink-0 border-t border-ink-700 bg-ink-900">
+            {mobileTabItems.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setMobileTab(id)}
+                className={cn(
+                  "flex flex-1 flex-col items-center gap-1 py-2 text-[11px] font-medium transition-colors",
+                  mobileTab === id ? "text-amber-glow" : "text-ink-400 active:text-ink-200"
+                )}
+              >
+                <Icon className="h-5 w-5" />
+                {label}
+              </button>
+            ))}
+          </nav>
+        </div>
+      ) : (
+        /* ── Desktop layout: resizable columns ── */
+        <div ref={layoutRef} className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <div
+            className="min-h-0 shrink-0"
+            style={{ width: sidebarWidth }}
+          >
+            <FileExplorer />
+          </div>
 
-        {/* Editor */}
-        <ResizablePanel defaultSize={45} minSize={25}>
-          <div className="flex flex-col h-full">
-            <EditorTabs />
-            <div className="flex-1 min-h-0">
-              <MonacoEditor />
+          <ResizeHandle orientation="horizontal" onPointerDown={(event) => beginHorizontalResize("sidebar", event)} />
+
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="flex h-full min-h-0 min-w-0 flex-col">
+              <EditorTabs />
+              <div className="flex-1 min-h-0">
+                <MonacoEditor onCompile={handleCompile} />
+              </div>
             </div>
           </div>
-        </ResizablePanel>
 
-        <ResizableHandle />
+          <ResizeHandle orientation="horizontal" onPointerDown={(event) => beginHorizontalResize("preview", event)} />
 
-        {/* Preview + Console */}
-        <ResizablePanel defaultSize={40} minSize={20}>
-          <ResizablePanelGroup orientation="vertical">
-            <ResizablePanel defaultSize={70} minSize={20}>
+          <div
+            ref={rightColumnRef}
+            className="flex min-h-0 shrink-0 flex-col"
+            style={{ width: previewWidth }}
+          >
+            <div
+              className="min-h-0 flex-1"
+              style={{ height: `calc(100% - ${consoleHeight + HANDLE_SIZE}px)` }}
+            >
               <PdfPreview compileResult={compileResult} />
-            </ResizablePanel>
-            <ResizableHandle />
-            <ResizablePanel defaultSize={30} minSize={15}>
+            </div>
+            <ResizeHandle orientation="vertical" onPointerDown={beginVerticalResize} />
+            <div className="min-h-0 shrink-0" style={{ height: consoleHeight }}>
               <CompileConsole compileResult={compileResult} isCompiling={isCompiling} />
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Toaster
         theme="dark"

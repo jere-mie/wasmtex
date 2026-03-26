@@ -1,4 +1,4 @@
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { useFiles } from "@/context/FileContext";
@@ -6,13 +6,24 @@ import { useFiles } from "@/context/FileContext";
 // Store Monaco models per file to preserve undo history
 const modelCache = new Map<string, editor.ITextModel>();
 
-export function MonacoEditor() {
+interface MonacoEditorProps {
+  onCompile?: () => void;
+}
+
+export function MonacoEditor({ onCompile }: MonacoEditorProps) {
   const { activeFile, getFileContent, updateFileContent } = useFiles();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const onCompileRef = useRef(onCompile);
+  useEffect(() => { onCompileRef.current = onCompile; }, [onCompile]);
 
   const handleMount: OnMount = useCallback(
     (editor, monaco) => {
       editorRef.current = editor;
+
+      // Override Ctrl/Cmd+Enter to compile instead of inserting a new line
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+        onCompileRef.current?.();
+      });
 
       // Define custom LaTeX-inspired theme
       monaco.editor.defineTheme("wasmtex-dark", {

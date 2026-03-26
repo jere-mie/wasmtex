@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useRef } from "react";
 import { useFiles } from "@/context/FileContext";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -12,47 +13,23 @@ import {
 import {
   Play,
   Plus,
-  Download,
-  Settings,
+  Upload,
   Loader2,
+  Download,
 } from "lucide-react";
-import type { CompileResponse } from "@/workers/tex.worker";
+import type { VFSFile } from "@/context/FileContext";
+import { buildZip } from "@/lib/zip";
 
 interface ToolbarProps {
-  onCompileResult: (result: CompileResponse) => void;
+  onCompile: () => void;
   isCompiling: boolean;
-  setIsCompiling: (v: boolean) => void;
 }
 
-export function Toolbar({ onCompileResult, isCompiling, setIsCompiling }: ToolbarProps) {
-  const { files, createFile, activeFile } = useFiles();
+export function Toolbar({ onCompile, isCompiling }: ToolbarProps) {
+  const { createFile, importFiles, files } = useFiles();
   const [newFileOpen, setNewFileOpen] = useState(false);
   const [newFileName, setNewFileName] = useState("");
-  const workerRef = useRef<Worker | null>(null);
-
-  const handleCompile = useCallback(() => {
-    if (isCompiling) return;
-    setIsCompiling(true);
-
-    if (!workerRef.current) {
-      workerRef.current = new Worker(
-        new URL("@/workers/tex.worker.ts", import.meta.url),
-        { type: "module" }
-      );
-    }
-
-    const worker = workerRef.current;
-    worker.onmessage = (e: MessageEvent<CompileResponse>) => {
-      onCompileResult(e.data);
-      setIsCompiling(false);
-    };
-
-    worker.postMessage({
-      type: "compile",
-      files: files.map((f) => ({ name: f.name, content: f.content })),
-      mainFile: activeFile ?? "main.tex",
-    });
-  }, [files, activeFile, isCompiling, onCompileResult, setIsCompiling]);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleNewFile = () => {
     const name = newFileName.trim();
@@ -62,6 +39,67 @@ export function Toolbar({ onCompileResult, isCompiling, setIsCompiling }: Toolba
     setNewFileOpen(false);
   };
 
+  const handleDownload = () => {
+    if (files.length === 0) return;
+    const zip = buildZip(files.map((f) => ({ name: f.name, content: f.content })));
+    const url = URL.createObjectURL(new Blob([zip], { type: "application/zip" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "wasmtex-project.zip";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleUploadClick = () => {
+    uploadInputRef.current?.click();
+  };
+
+  const handleUploadChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files ?? []);
+
+    if (selectedFiles.length === 0) return;
+
+    const uploadedFiles = await Promise.all(
+      selectedFiles.map(
+        (file) =>
+          new Promise<VFSFile>((resolve, reject) => {
+            const reader = new FileReader();
+
+            reader.onload = () => {
+              resolve({
+                name: file.name,
+                content: typeof reader.result === "string" ? reader.result : "",
+              });
+            };
+
+            reader.onerror = () => {
+              reject(reader.error ?? new Error(`Failed to read ${file.name}`));
+            };
+
+            reader.readAsText(file);
+          })
+      )
+    ).catch((error: unknown) => {
+      toast.error("Upload failed", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    });
+
+    event.target.value = "";
+
+    if (!uploadedFiles) return;
+
+    importFiles(uploadedFiles);
+
+    toast.success("Files imported", {
+      description:
+        uploadedFiles.length === 1
+          ? `${uploadedFiles[0].name} added to the project.`
+          : `${uploadedFiles.length} files added to the project.`,
+    });
+  };
+
   return (
     <header className="flex items-center h-11 px-3 bg-ink-900 border-b border-ink-700 shrink-0 gap-2">
       {/* Logo */}
@@ -69,7 +107,7 @@ export function Toolbar({ onCompileResult, isCompiling, setIsCompiling }: Toolba
         <div className="w-6 h-6 rounded bg-gradient-to-br from-amber-glow to-amber-dim flex items-center justify-center">
           <span className="font-display text-ink-950 text-xs font-bold leading-none">T</span>
         </div>
-        <h1 className="font-display text-base font-semibold text-amber-glow tracking-wide">
+        <h1 className="hidden sm:block font-display text-base font-semibold text-amber-glow tracking-wide">
           WasmTeX
         </h1>
       </div>
@@ -80,16 +118,17 @@ export function Toolbar({ onCompileResult, isCompiling, setIsCompiling }: Toolba
       <Button
         variant="default"
         size="sm"
-        onClick={handleCompile}
+        onClick={onCompile}
         disabled={isCompiling}
         className="gap-1.5 font-mono text-xs"
+        title="Compile (Ctrl/Cmd+Enter)"
       >
         {isCompiling ? (
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
         ) : (
           <Play className="h-3.5 w-3.5" />
         )}
-        {isCompiling ? "Compiling..." : "Compile"}
+        <span className="hidden sm:inline">{isCompiling ? "Compiling..." : "Compile"}</span>
       </Button>
 
       {/* New File */}
@@ -97,15 +136,30 @@ export function Toolbar({ onCompileResult, isCompiling, setIsCompiling }: Toolba
         <Plus className="h-4 w-4" />
       </Button>
 
-      <div className="flex-1" />
+      <Button variant="ghost" size="icon" onClick={handleUploadClick} title="Upload Files">
+        <Upload className="h-4 w-4" />
+      </Button>
 
-      {/* Right side  */}
-      <Button variant="ghost" size="icon" title="Download Project">
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={handleDownload}
+        disabled={files.length === 0}
+        title="Download all files as ZIP"
+      >
         <Download className="h-4 w-4" />
       </Button>
-      <Button variant="ghost" size="icon" title="Settings">
-        <Settings className="h-4 w-4" />
-      </Button>
+
+      <input
+        ref={uploadInputRef}
+        type="file"
+        multiple
+        accept=".tex,.bib,.sty,.cls,.bst,.txt,.csv,.tsv,.tikz,.pgf,.svg,text/*"
+        className="hidden"
+        onChange={handleUploadChange}
+      />
+
+      <div className="flex-1" />
 
       {/* New File Dialog */}
       <Dialog open={newFileOpen} onOpenChange={setNewFileOpen}>

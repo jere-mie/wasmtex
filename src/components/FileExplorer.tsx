@@ -23,6 +23,7 @@ import {
   Pencil,
   Trash2,
   Plus,
+  Download,
 } from "lucide-react";
 
 export function FileExplorer() {
@@ -33,6 +34,7 @@ export function FileExplorer() {
     createFile,
     renameFile,
     deleteFile,
+    getFileContent,
   } = useFiles();
 
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
@@ -64,8 +66,18 @@ export function FileExplorer() {
     }
   };
 
+  const handleDownloadFile = (name: string) => {
+    const content = getFileContent(name) ?? "";
+    const url = URL.createObjectURL(new Blob([content], { type: "text/plain" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <div className="flex flex-col h-full bg-ink-900">
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-ink-900">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-ink-700">
         <div className="flex items-center gap-1.5">
@@ -83,7 +95,7 @@ export function FileExplorer() {
       </div>
 
       {/* File tree */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="py-1">
           {files.map((file) => (
             <ContextMenu key={file.name}>
@@ -113,6 +125,10 @@ export function FileExplorer() {
                 >
                   <Pencil className="h-3.5 w-3.5 mr-2" />
                   Rename
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => handleDownloadFile(file.name)}>
+                  <Download className="h-3.5 w-3.5 mr-2" />
+                  Download
                 </ContextMenuItem>
                 <ContextMenuSeparator />
                 <ContextMenuItem
