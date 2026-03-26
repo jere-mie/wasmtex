@@ -7,7 +7,7 @@ import { MonacoEditor } from "@/components/MonacoEditor";
 import { PdfPreview } from "@/components/PdfPreview";
 import { CompileConsole } from "@/components/CompileConsole";
 import { useFiles } from "@/context/FileContext";
-import type { CompileResponse } from "@/workers/tex.worker";
+import type { CompileResponse, CompileStatusMessage } from "@/workers/tex.worker";
 import { cn } from "@/lib/utils";
 import { FolderOpen, FileText, Eye } from "lucide-react";
 
@@ -82,6 +82,7 @@ function App() {
   const { files, activeFile } = useFiles();
   const [compileResult, setCompileResult] = useState<CompileResponse | null>(null);
   const [isCompiling, setIsCompiling] = useState(false);
+  const [compilePhase, setCompilePhase] = useState<CompileStatusMessage["phase"] | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [previewWidth, setPreviewWidth] = useState(DEFAULT_PREVIEW_WIDTH);
   const [consoleHeight, setConsoleHeight] = useState(DEFAULT_CONSOLE_HEIGHT);
@@ -94,6 +95,7 @@ function App() {
   const handleCompileResult = useCallback((result: CompileResponse) => {
     setCompileResult(result);
     setIsCompiling(false);
+    setCompilePhase(null);
     if (result.success) {
       toast.success("Compilation successful", {
         description: "Document built without errors.",
@@ -124,7 +126,11 @@ function App() {
       files[0]?.name ??
       "main.tex";
 
-    worker.onmessage = (event: MessageEvent<CompileResponse>) => {
+    worker.onmessage = (event: MessageEvent<CompileResponse | CompileStatusMessage>) => {
+      if (event.data.type === "compile-status") {
+        setCompilePhase(event.data.phase);
+        return;
+      }
       handleCompileResult(event.data);
     };
 
@@ -322,7 +328,7 @@ function App() {
                   <PdfPreview compileResult={compileResult} />
                 </div>
                 <div className="shrink-0" style={{ height: 180 }}>
-                  <CompileConsole compileResult={compileResult} isCompiling={isCompiling} />
+                  <CompileConsole compileResult={compileResult} isCompiling={isCompiling} compilePhase={compilePhase} />
                 </div>
               </div>
             )}
@@ -381,7 +387,7 @@ function App() {
             </div>
             <ResizeHandle orientation="vertical" onPointerDown={beginVerticalResize} />
             <div className="min-h-0 shrink-0" style={{ height: consoleHeight }}>
-              <CompileConsole compileResult={compileResult} isCompiling={isCompiling} />
+              <CompileConsole compileResult={compileResult} isCompiling={isCompiling} compilePhase={compilePhase} />
             </div>
           </div>
         </div>

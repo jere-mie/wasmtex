@@ -6,6 +6,11 @@ export interface CompileRequest {
   mainFile: string;
 }
 
+export interface CompileStatusMessage {
+  type: "compile-status";
+  phase: "initializing" | "compiling";
+}
+
 export interface CompileResponse {
   type: "compile-result";
   success: boolean;
@@ -125,7 +130,13 @@ self.onmessage = async (event: MessageEvent<CompileRequest>) => {
       return;
     }
 
+    const statusInit: CompileStatusMessage = { type: "compile-status", phase: "initializing" };
+    self.postMessage(statusInit);
+
     await ensureRunnerReady();
+
+    const statusCompiling: CompileStatusMessage = { type: "compile-status", phase: "compiling" };
+    self.postMessage(statusCompiling);
 
     const result = await compileWithFallback(files, mainFile);
 

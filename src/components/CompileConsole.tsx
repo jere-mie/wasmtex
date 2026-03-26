@@ -1,16 +1,26 @@
 import { useRef, useEffect, useState } from "react";
-import type { CompileResponse } from "@/workers/tex.worker";
+import type { CompileResponse, CompileStatusMessage } from "@/workers/tex.worker";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Terminal, CheckCircle2, XCircle, AlertCircle, Copy, Check } from "lucide-react";
+import { Terminal, CheckCircle2, XCircle, AlertCircle, Copy, Check, Loader2 } from "lucide-react";
 
 interface CompileConsoleProps {
   compileResult: CompileResponse | null;
   isCompiling: boolean;
+  compilePhase: CompileStatusMessage["phase"] | null;
 }
 
-export function CompileConsole({ compileResult, isCompiling }: CompileConsoleProps) {
+export function CompileConsole({ compileResult, isCompiling, compilePhase }: CompileConsoleProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+
+  // Tick elapsed seconds while compiling
+  useEffect(() => {
+    if (!isCompiling) { setElapsed(0); return; }
+    setElapsed(0);
+    const id = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [isCompiling]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -24,6 +34,9 @@ export function CompileConsole({ compileResult, isCompiling }: CompileConsolePro
     });
   };
 
+  const isInitializing = isCompiling && compilePhase === "initializing";
+  const isRunning = isCompiling && compilePhase === "compiling";
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-ink-950 border-t border-ink-700">
       {/* Console header */}
@@ -32,7 +45,10 @@ export function CompileConsole({ compileResult, isCompiling }: CompileConsolePro
         <span className="text-[11px] font-semibold uppercase tracking-widest text-ink-400">
           Console
         </span>
-        {compileResult && (
+        {isCompiling && (
+          <span className="font-mono text-[10px] text-ink-500 ml-1">{elapsed}s</span>
+        )}
+        {compileResult && !isCompiling && (
           <div className="ml-auto flex items-center gap-1.5">
             <button
               onClick={handleCopy}
@@ -65,11 +81,32 @@ export function CompileConsole({ compileResult, isCompiling }: CompileConsolePro
 
       {/* Console output */}
       <ScrollArea className="min-h-0 flex-1">
-        <div className="p-3 font-mono text-xs leading-relaxed">
-          {isCompiling && (
+        <div className="p-3 font-mono text-xs leading-relaxed space-y-3">
+          {isInitializing && (
+            <div className="rounded-md border border-amber-glow/20 bg-amber-glow/5 p-3 space-y-1.5">
+              <div className="flex items-center gap-2 text-amber-glow">
+                <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                <span className="font-semibold">Downloading TeX engine...</span>
+              </div>
+              <p className="text-ink-400 text-[11px] leading-relaxed pl-5">
+                The TeX runtime (~430 MB) is being fetched from the server. This only happens
+                once - subsequent compiles will be fast. Please wait, this may take up to a
+                minute depending on your connection.
+              </p>
+            </div>
+          )}
+
+          {isRunning && (
+            <div className="flex items-center gap-2 text-amber-glow">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <span>Compiling document...</span>
+            </div>
+          )}
+
+          {isCompiling && !compilePhase && (
             <div className="flex items-center gap-2 text-amber-glow">
               <AlertCircle className="h-3.5 w-3.5 animate-pulse" />
-              <span>Compiling...</span>
+              <span>Starting...</span>
             </div>
           )}
 
