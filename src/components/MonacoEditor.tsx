@@ -11,6 +11,9 @@ import {
 // Store Monaco models per file to preserve undo history
 const modelCache = new Map<string, editor.ITextModel>();
 
+// Guard: only register the \begin completion provider once across remounts
+let envCompletionRegistered = false;
+
 interface MonacoEditorProps {
   onCompile?: () => void;
 }
@@ -46,6 +49,7 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
         onCompileRef.current?.();
       });
+
 
       // Define custom LaTeX-inspired theme
       monaco.editor.defineTheme("wasmtex-dark", {
@@ -110,7 +114,45 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
           },
         });
       }
+      // Register \begin{env} -> snippet completion (fires on '}' trigger)
+      if (!envCompletionRegistered) {
+        envCompletionRegistered = true;
+        monaco.languages.registerCompletionItemProvider("latex", {
+          triggerCharacters: ["}"],
+          provideCompletionItems(model, position) {
+            const lineContent = model.getLineContent(position.lineNumber);
+            const textBefore = lineContent.substring(0, position.column - 1);
+            const match = textBefore.match(/\\begin\{([^}]+)\}$/);
+            if (!match) return { suggestions: [] };
 
+            const envName = match[1];
+            const indent = lineContent.match(/^(\s*)/)?.[1] ?? "";
+            const contentIndent = indent + "  ";
+
+            // Replace the entire \begin{envName} text the user already typed
+            const startCol = textBefore.lastIndexOf("\\begin{") + 1; // 1-based
+
+            return {
+              suggestions: [
+                {
+                  label: `\\begin{${envName}} … \\end{${envName}}`,
+                  kind: monaco.languages.CompletionItemKind.Snippet,
+                  insertText: `\\begin{${envName}}\n${contentIndent}$0\n${indent}\\end{${envName}}`,
+                  insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                  range: new monaco.Range(
+                    position.lineNumber,
+                    startCol,
+                    position.lineNumber,
+                    position.column
+                  ),
+                  detail: "LaTeX environment",
+                  sortText: "0",
+                },
+              ],
+            };
+          },
+        });
+      }
       // Set model for active file
     if (activeFile && isEditableTextFile) {
       setModelForFile(editor, monaco, activeFile, getFileContent(activeFile) ?? "");

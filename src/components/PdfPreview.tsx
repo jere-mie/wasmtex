@@ -1,44 +1,66 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CompileResponse } from "@/workers/tex.worker";
-import { FileText } from "lucide-react";
+import { AlertTriangle, FileText } from "lucide-react";
 
 interface PdfPreviewProps {
   compileResult: CompileResponse | null;
 }
 
 export function PdfPreview({ compileResult }: PdfPreviewProps) {
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [displayUrl, setDisplayUrl] = useState<string | null>(null);
+  const [isStale, setIsStale] = useState(false);
+  const displayUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!compileResult?.success || !compileResult.pdf) {
-      setPdfUrl(null);
-      return;
+    if (!compileResult) return;
+
+    if (compileResult.success && compileResult.pdf) {
+      const url = URL.createObjectURL(
+        new Blob([compileResult.pdf as BlobPart], { type: "application/pdf" })
+      );
+      // Revoke the previous URL now that we have a new one
+      if (displayUrlRef.current) {
+        URL.revokeObjectURL(displayUrlRef.current);
+      }
+      displayUrlRef.current = url;
+      setDisplayUrl(url);
+      setIsStale(false);
+    } else if (!compileResult.success) {
+      // Keep the cached URL visible but mark it as stale
+      setIsStale(true);
     }
-
-    const url = URL.createObjectURL(
-      new Blob([compileResult.pdf as BlobPart], { type: "application/pdf" })
-    );
-
-    setPdfUrl(url);
-
-    return () => {
-      URL.revokeObjectURL(url);
-    };
   }, [compileResult]);
 
-  if (pdfUrl) {
+  // Revoke the cached URL on unmount
+  useEffect(() => {
+    return () => {
+      if (displayUrlRef.current) {
+        URL.revokeObjectURL(displayUrlRef.current);
+      }
+    };
+  }, []);
+
+  if (displayUrl) {
     return (
-      <div className="flex h-full min-h-0 flex-1 bg-ink-950">
+      <div className="flex h-full min-h-0 flex-1 flex-col bg-ink-950">
+        {isStale && (
+          <div className="shrink-0 flex items-center gap-2 bg-amber-950/60 border-b border-amber-800/50 px-3 py-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400/80" />
+            <span className="text-[11px] text-amber-300/70">
+              Preview is outdated — showing last successful build.
+            </span>
+          </div>
+        )}
         <iframe
-          src={`${pdfUrl}#view=FitH`}
-          className="w-full h-full border-0"
+          src={`${displayUrl}#view=FitH`}
+          className="w-full flex-1 border-0"
           title="PDF Preview"
         />
       </div>
     );
   }
 
-  // Empty state
+  // Empty state — no successful compilation yet
   return (
     <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-ink-950">
       <div className="text-center space-y-4 px-8 max-w-xs">
