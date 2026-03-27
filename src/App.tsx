@@ -87,6 +87,7 @@ function ResizeHandle({
 function App() {
   const { files, activeFile, importFiles } = useFiles();
   const [compileResult, setCompileResult] = useState<CompileResponse | null>(null);
+  const [compiledPdfName, setCompiledPdfName] = useState<string>("document.pdf");
   const [isCompiling, setIsCompiling] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [autoCompile, setAutoCompile] = useState<boolean>(() => {
@@ -152,6 +153,8 @@ function App() {
       files.find((file) => file.name === "main.tex")?.name ??
       files[0]?.name ??
       "main.tex";
+    const pdfName = mainFile.replace(/\.tex$/i, ".pdf");
+    setCompiledPdfName(pdfName);
 
     worker.onmessage = (event: MessageEvent<CompileResponse | CompileStatusMessage>) => {
       if (event.data.type === "compile-status") {
@@ -453,7 +456,7 @@ function App() {
             {mobileTab === "preview" && (
               <div className="flex h-full min-h-0 flex-col">
                 <div className="flex-1 min-h-0">
-                  <PdfPreview compileResult={compileResult} />
+                  <PdfPreview compileResult={compileResult} pdfName={compiledPdfName} />
                 </div>
                 <div className="shrink-0" style={{ height: 180 }}>
                   <CompileConsole compileResult={compileResult} isCompiling={isCompiling} compilePhase={compilePhase} compileStartTime={compileStartTime} />
@@ -511,7 +514,7 @@ function App() {
               className="min-h-0 flex-1"
               style={{ height: `calc(100% - ${consoleHeight + HANDLE_SIZE}px)` }}
             >
-              <PdfPreview compileResult={compileResult} />
+              <PdfPreview compileResult={compileResult} pdfName={compiledPdfName} />
             </div>
             <ResizeHandle orientation="vertical" onPointerDown={beginVerticalResize} />
             <div className="min-h-0 shrink-0" style={{ height: consoleHeight }}>
