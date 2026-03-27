@@ -129,16 +129,13 @@ export function PdfPreview({ compileResult, pdfName = "document.pdf" }: PdfPrevi
             </span>
           </div>
         )}
-        <div
-          ref={containerRef}
-          className="flex-1 overflow-y-auto overflow-x-auto"
-        >
-          <Document
-            file={pdfFile}
-            onLoadSuccess={({ numPages }) => setNumPages(numPages)}
-            className="py-4"
-            style={{ minWidth: "fit-content" }}
-          >
+        <div ref={containerRef} className="flex-1 overflow-y-auto overflow-x-auto">
+          <div style={{ minWidth: "fit-content" }}>
+            <Document
+              file={pdfFile}
+              onLoadSuccess={({ numPages }) => setNumPages(numPages)}
+              className="py-4"
+            >
             {Array.from({ length: numPages }, (_, i) => (
               <div key={`page_${i + 1}_r${rotation}`} style={{ width: "fit-content", margin: "0 auto 1rem" }}>
                 <Page
@@ -152,7 +149,8 @@ export function PdfPreview({ compileResult, pdfName = "document.pdf" }: PdfPrevi
                 />
               </div>
             ))}
-          </Document>
+            </Document>
+          </div>
         </div>
       </div>
     );
