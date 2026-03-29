@@ -6,10 +6,11 @@
   "scripts": {
     "postinstall": "patch-package",
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run download:typst-fonts && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "download:tex-assets": "texlyre-busytex download-assets ./public/core"
+    "download:tex-assets": "texlyre-busytex download-assets ./public/core",
+    "download:typst-fonts": "node ./scripts/download-typst-fonts.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
