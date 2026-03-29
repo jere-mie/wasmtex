@@ -29,7 +29,7 @@ export function PdfPreview({ compileResult, pdfName = "document.pdf" }: PdfPrevi
   const [rotation, setRotation] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Keep a raw-bytes ref purely for download — never passed to PDF.js
+  // Keep a raw-bytes ref purely for download - never passed to PDF.js
   const downloadBytesRef = useRef<Uint8Array | null>(null);
 
   const pdfFile = useMemo(
@@ -125,7 +125,7 @@ export function PdfPreview({ compileResult, pdfName = "document.pdf" }: PdfPrevi
           <div className="shrink-0 flex items-center gap-2 bg-amber-950/60 border-b border-amber-800/50 px-3 py-1.5">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400/80" />
             <span className="text-[11px] text-amber-300/70">
-              Preview is outdated — showing last successful build.
+              Preview is outdated - showing last successful build.
             </span>
           </div>
         )}
@@ -156,7 +156,7 @@ export function PdfPreview({ compileResult, pdfName = "document.pdf" }: PdfPrevi
     );
   }
 
-  // Empty state — no successful compilation yet
+  // Empty state - no successful compilation yet
   return (
     <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-ink-950">
       <div className="text-center space-y-4 px-8 max-w-xs">

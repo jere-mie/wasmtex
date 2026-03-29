@@ -138,6 +138,33 @@ interface MonacoEditorProps {
   onCompile?: () => void;
 }
 
+function refreshEditorFontMetrics(activeEditor: editor.IStandaloneCodeEditor) {
+  monaco.editor.remeasureFonts();
+  activeEditor.render();
+  activeEditor.layout();
+}
+
+function scheduleEditorFontRefresh(activeEditor: editor.IStandaloneCodeEditor) {
+  refreshEditorFontMetrics(activeEditor);
+
+  const animationFrameId = window.requestAnimationFrame(() => {
+    refreshEditorFontMetrics(activeEditor);
+  });
+
+  let disposed = false;
+
+  void document.fonts.ready.then(() => {
+    if (!disposed) {
+      refreshEditorFontMetrics(activeEditor);
+    }
+  });
+
+  return () => {
+    disposed = true;
+    window.cancelAnimationFrame(animationFrameId);
+  };
+}
+
 function getEditorLanguage(fileName: string) {
   switch (getFileExtension(fileName)) {
     case "tex":
@@ -169,8 +196,10 @@ function getEditorLanguage(fileName: string) {
 export function MonacoEditor({ onCompile }: MonacoEditorProps) {
   const { activeFile, getFile, getFileContent, updateFileContent } = useFiles();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const fontRefreshCleanupRef = useRef<(() => void) | null>(null);
   const onCompileRef = useRef(onCompile);
   useEffect(() => { onCompileRef.current = onCompile; }, [onCompile]);
+  useEffect(() => () => { fontRefreshCleanupRef.current?.(); }, []);
 
   const activeEntry = activeFile ? getFile(activeFile) : undefined;
   const isEditableTextFile = activeEntry ? isTextFile(activeEntry) : false;
@@ -194,6 +223,8 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
 
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+    fontRefreshCleanupRef.current?.();
+    fontRefreshCleanupRef.current = scheduleEditorFontRefresh(editor);
 
       // Override Ctrl/Cmd+Enter to compile instead of inserting a new line
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
@@ -300,7 +331,7 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
             return {
               suggestions: [
                 {
-                  label: `\\begin{${envName}} … \\end{${envName}}`,
+                  label: `\\begin{${envName}} ... \\end{${envName}}`,
                   kind: monaco.languages.CompletionItemKind.Snippet,
                   insertText: `\\begin{${envName}}\n${contentIndent}$0\n${indent}\\end{${envName}}`,
                   insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
@@ -329,6 +360,14 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
       updateFileContent(activeFile, value);
     }
   };
+
+  useEffect(() => {
+    if (!editorRef.current || !isEditableTextFile) {
+      return;
+    }
+
+    refreshEditorFontMetrics(editorRef.current);
+  }, [activeFile, isEditableTextFile]);
 
   if (!activeFile) {
     return (
@@ -376,6 +415,7 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
       options={{
         fontFamily: "'JetBrains Mono', Consolas, monospace",
         fontSize: 13.5,
+        fontLigatures: false,
         lineHeight: 22,
         padding: { top: 12, bottom: 12 },
         minimap: { enabled: false },

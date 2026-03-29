@@ -55,6 +55,33 @@ Or the quadratic formula:
 \\end{document}
 `;
 
+const DEFAULT_MAIN_TYP = `#set page(numbering: "1")
+
+= My First Typst Document
+WasmTeX User
+
+== Introduction
+Welcome to **WasmTeX**, a browser-based Typst editor powered by WebAssembly.
+
+This document is being compiled entirely in your browser - no server required.
+
+== Mathematics
+The beauty of math typesetting is simple. Consider Euler's identity:
+
+$ e^{i\\pi} + 1 = 0 $
+
+Or the quadratic formula:
+
+$ x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a} $
+
+== Features
+- Real-time PDF preview
+- Syntax highlighting via Monaco Editor
+- Virtual file system with IndexedDB persistence
+- Privacy-first: everything stays in your browser
+
+`;
+
 interface FileContextType {
   files: VFSFile[];
   folders: string[];
@@ -155,17 +182,24 @@ export function FileProvider({ children }: { children: ReactNode }) {
       const storedFolders = await get(IDB_FOLDERS_KEY);
 
       if (vfsKeys.length === 0) {
-        // Initialize with default main.tex
-        const defaultFile: VFSFile = {
+        // Initialize with default main.tex and a sample main.typ
+        const texFile: VFSFile = {
           name: "main.tex",
           content: DEFAULT_MAIN_TEX,
           kind: "text",
         };
-        await set(IDB_PREFIX + "main.tex", serializeFile(defaultFile));
-        setFiles([defaultFile]);
+        const typFile: VFSFile = {
+          name: "main.typ",
+          content: DEFAULT_MAIN_TYP,
+          kind: "text",
+        };
+        await set(IDB_PREFIX + "main.tex", serializeFile(texFile));
+        await set(IDB_PREFIX + "main.typ", serializeFile(typFile));
+        setFiles([texFile, typFile]);
         setFolders([]);
+        // Preserve original behavior: keep main.tex active, but open both files
         setActiveFile("main.tex");
-        setOpenFiles(["main.tex"]);
+        setOpenFiles(["main.tex", "main.typ"]);
       } else {
         const loaded: VFSFile[] = [];
         for (const key of vfsKeys) {
