@@ -16,6 +16,124 @@ const modelCache = new Map<string, editor.ITextModel>();
 // Guard: only register the \begin completion provider once across remounts
 let envCompletionRegistered = false;
 
+const TYPST_LANGUAGE_CONFIGURATION: monaco.languages.LanguageConfiguration = {
+  comments: {
+    lineComment: "//",
+    blockComment: ["/*", "*/"],
+  },
+  brackets: [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+  ],
+  autoClosingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: "(", close: ")" },
+    { open: '"', close: '"' },
+    { open: "`", close: "`" },
+  ],
+  surroundingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: "(", close: ")" },
+    { open: '"', close: '"' },
+    { open: "`", close: "`" },
+  ],
+};
+
+const TYPST_TOKENIZER: monaco.languages.IMonarchLanguage = {
+  defaultToken: "",
+  tokenPostfix: ".typst",
+  keywords: [
+    "as",
+    "break",
+    "context",
+    "continue",
+    "else",
+    "for",
+    "if",
+    "import",
+    "in",
+    "include",
+    "let",
+    "return",
+    "set",
+    "show",
+    "while",
+  ],
+  builtins: ["auto", "false", "none", "true"],
+  tokenizer: {
+    root: [
+      [/^\s*=+.*$/, "markup.heading"],
+      [/(^\s*)([-+])(\s)/, ["white", "markup.list", "white"]],
+      [/(^\s*)(\d+\.)(\s)/, ["white", "markup.list", "white"]],
+      [/\/\/.*$/, "comment"],
+      [/\/\*/, "comment", "@comment"],
+      [/```/, "string.raw", "@rawBlock"],
+      [/`/, "string.raw", "@rawInline"],
+      [/<[A-Za-z0-9:_-]+>/, "type.identifier"],
+      [/@[A-Za-z0-9:_-]+/, "namespace"],
+      [/\$(?=\S)/, "delimiter.math", "@math"],
+      [/#(as|break|context|continue|else|for|if|import|in|include|let|return|set|show|while)\b/, "keyword.control"],
+      [/#[A-Za-z_][\w-]*/, "function"],
+      [/"/, "string.quote", "@string"],
+      [/\b(?:0x[\da-fA-F]+|\d+(?:\.\d+)?(?:e[+-]?\d+)?(?:pt|mm|cm|in|em|fr|deg|rad|%)?)\b/, "number"],
+      [/\b[A-Za-z_][\w-]*(?=\s*:)/, "attribute.name"],
+      [/\b[A-Za-z_][\w-]*(?=\s*\()/, "function"],
+      [/\b[A-Za-z_][\w-]*\b/, {
+        cases: {
+          "@keywords": "keyword",
+          "@builtins": "keyword",
+          "@default": "identifier",
+        },
+      }],
+      [/[{}\[\]()]/, "@brackets"],
+      [/[,:;]/, "delimiter"],
+      [/[+\-*/=<>!^&|]+/, "operator"],
+      [/[*_](?=\S)/, "markup.emphasis"],
+      [/#/, "delimiter"],
+    ],
+    string: [
+      [/[^\\"]+/, "string"],
+      [/\\./, "escape"],
+      [/"/, "string.quote", "@pop"],
+    ],
+    comment: [
+      [/[^/*]+/, "comment"],
+      [/\/\*/, "comment", "@push"],
+      [/\*\//, "comment", "@pop"],
+      [/[/*]/, "comment"],
+    ],
+    rawBlock: [
+      [/```/, "string.raw", "@pop"],
+      [/[^`]+/, "string.raw"],
+      [/`/, "string.raw"],
+    ],
+    rawInline: [
+      [/`/, "string.raw", "@pop"],
+      [/[^`]+/, "string.raw"],
+    ],
+    math: [
+      [/\$/, "delimiter.math", "@pop"],
+      [/\/\/.*$/, "comment"],
+      [/\/\*/, "comment", "@comment"],
+      [/"/, "string.quote", "@string"],
+      [/\b(?:0x[\da-fA-F]+|\d+(?:\.\d+)?(?:e[+-]?\d+)?)\b/, "number"],
+      [/\b[A-Za-z_][\w-]*(?=\s*\()/, "function"],
+      [/\b[A-Za-z_][\w-]*\b/, {
+        cases: {
+          "@builtins": "keyword",
+          "@default": "identifier",
+        },
+      }],
+      [/[{}\[\]()]/, "@brackets"],
+      [/[,:;]/, "delimiter"],
+      [/[+\-*/=<>!^_&|]+/, "operator"],
+    ],
+  },
+};
+
 interface MonacoEditorProps {
   onCompile?: () => void;
 }
@@ -90,9 +208,19 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
         rules: [
           { token: "comment", foreground: "6b6080", fontStyle: "italic" },
           { token: "keyword", foreground: "d4a574" },
+          { token: "keyword.control", foreground: "f59e0b" },
           { token: "string", foreground: "4ade80" },
+          { token: "string.raw", foreground: "86efac" },
           { token: "number", foreground: "e8c49a" },
           { token: "type", foreground: "c4b5fd" },
+          { token: "type.identifier", foreground: "c4b5fd" },
+          { token: "function", foreground: "7dd3fc" },
+          { token: "namespace", foreground: "67e8f9" },
+          { token: "operator", foreground: "f1f5f9" },
+          { token: "escape", foreground: "c4b5fd" },
+          { token: "markup.heading", foreground: "fbbf24", fontStyle: "bold" },
+          { token: "markup.list", foreground: "8e85a3" },
+          { token: "markup.emphasis", foreground: "f9a8d4" },
           { token: "delimiter", foreground: "8e85a3" },
           { token: "tag", foreground: "d4a574" },
           { token: "attribute.name", foreground: "e8c49a" },
@@ -148,26 +276,8 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
       }
       if (!monaco.languages.getLanguages().some((l: { id: string }) => l.id === "typst")) {
         monaco.languages.register({ id: "typst" });
-        monaco.languages.setMonarchTokensProvider("typst", {
-          tokenizer: {
-            root: [
-              [/\/\/.+$/, "comment"],
-              [/\/\*/, "comment", "@comment"],
-              [/#(let|set|show|import|include|if|else|for|while|context)\b/, "keyword"],
-              [/@[a-zA-Z0-9_.-]+/, "type"],
-              [/"([^"\\]|\\.)*$/, "string.invalid"],
-              [/"([^"\\]|\\.)*"/, "string"],
-              [/[{}[\]()]/, "delimiter"],
-              [/\$+/, "delimiter.math"],
-              [/[0-9]+(?:\.[0-9]+)?/, "number"],
-            ],
-            comment: [
-              [/[^/*]+/, "comment"],
-              [/\*\//, "comment", "@pop"],
-              [/[/*]/, "comment"],
-            ],
-          },
-        });
+        monaco.languages.setLanguageConfiguration("typst", TYPST_LANGUAGE_CONFIGURATION);
+        monaco.languages.setMonarchTokensProvider("typst", TYPST_TOKENIZER);
       }
       // Register \begin{env} -> snippet completion (fires on '}' trigger)
       if (!envCompletionRegistered) {

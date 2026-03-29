@@ -41,8 +41,19 @@ interface WorkerCompileResult {
   exitCode?: number;
 }
 
+function resolvePublicAssetPath(relativePath: string) {
+  return new URL(
+    relativePath.replace(/^\/+/, ""),
+    new URL(import.meta.env.BASE_URL, self.location.origin)
+  ).toString();
+}
+
+const BUSYTEX_BASE_PATH = resolvePublicAssetPath("core/busytex");
+const TYPST_FONT_ASSET_PATH = resolvePublicAssetPath("core/typst-fonts");
+const TEXLIVE_EXTRA_PACKAGE_PATH = resolvePublicAssetPath("core/busytex/texlive-extra.js");
+
 const runner = new BusyTexRunner({
-  busytexBasePath: "/core/busytex",
+  busytexBasePath: BUSYTEX_BASE_PATH,
   verbose: false,
 });
 
@@ -53,7 +64,6 @@ const DRIVER_ORDER = [
   "luahbtex_bibtex8",
   "pdftex_bibtex8",
 ] as const;
-const TYPST_FONT_ASSET_PATH = "/core/typst-fonts";
 
 let runnerReady: Promise<void> | null = null;
 let typstReady: Promise<void> | null = null;
@@ -163,7 +173,7 @@ async function compileWithFallback(
       files.some((file) => file.name.endsWith(".bib")) || null,
       "info",
       driver,
-      ["/core/busytex/texlive-extra.js"]
+      [TEXLIVE_EXTRA_PACKAGE_PATH]
     );
 
     if (result.success) {
