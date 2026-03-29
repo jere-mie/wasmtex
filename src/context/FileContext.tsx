@@ -57,22 +57,20 @@ Or the quadratic formula:
 
 const DEFAULT_MAIN_TYP = `#set page(numbering: "1")
 
-= My First Typst Document
-WasmTeX User
+#align(center)[
+  = My First Typst Document
+  WasmTeX User
+]
 
 == Introduction
-Welcome to **WasmTeX**, a browser-based Typst editor powered by WebAssembly.
-
-This document is being compiled entirely in your browser - no server required.
+Welcome to *WasmTeX*, a browser-based Typst editor powered by WebAssembly.
 
 == Mathematics
-The beauty of math typesetting is simple. Consider Euler's identity:
+Euler's identity:
+$ e^(i pi) + 1 = 0 $
 
-$ e^{i\\pi} + 1 = 0 $
-
-Or the quadratic formula:
-
-$ x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a} $
+Quadratic formula:
+$ x = (-b plus.minus sqrt(b^2 - 4a c)) / (2a) $
 
 == Features
 - Real-time PDF preview
