@@ -4,6 +4,7 @@ import * as monaco from "monaco-editor";
 import type { editor } from "monaco-editor";
 import { useFiles } from "@/context/FileContext";
 import {
+  getFileExtension,
   getVFSFileSize,
   isImageFile,
   isTextFile,
@@ -17,6 +18,34 @@ let envCompletionRegistered = false;
 
 interface MonacoEditorProps {
   onCompile?: () => void;
+}
+
+function getEditorLanguage(fileName: string) {
+  switch (getFileExtension(fileName)) {
+    case "tex":
+    case "bib":
+    case "bst":
+    case "cls":
+    case "sty":
+      return "latex";
+    case "typ":
+      return "typst";
+    case "css":
+      return "css";
+    case "html":
+      return "html";
+    case "js":
+      return "javascript";
+    case "json":
+      return "json";
+    case "md":
+      return "markdown";
+    case "ts":
+    case "tsx":
+      return "typescript";
+    default:
+      return "plaintext";
+  }
 }
 
 export function MonacoEditor({ onCompile }: MonacoEditorProps) {
@@ -34,12 +63,14 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
     fileName: string,
     content: string
   ) {
+    const language = getEditorLanguage(fileName);
     let model = modelCache.get(fileName);
     if (!model || model.isDisposed()) {
       const uri = monaco.Uri.parse(`file:///${fileName}`);
-      model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(content, "latex", uri);
+      model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(content, language, uri);
       modelCache.set(fileName, model);
     }
+    monaco.editor.setModelLanguage(model, language);
     editor.setModel(model);
   }
 
@@ -115,6 +146,29 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
           },
         });
       }
+      if (!monaco.languages.getLanguages().some((l: { id: string }) => l.id === "typst")) {
+        monaco.languages.register({ id: "typst" });
+        monaco.languages.setMonarchTokensProvider("typst", {
+          tokenizer: {
+            root: [
+              [/\/\/.+$/, "comment"],
+              [/\/\*/, "comment", "@comment"],
+              [/#(let|set|show|import|include|if|else|for|while|context)\b/, "keyword"],
+              [/@[a-zA-Z0-9_.-]+/, "type"],
+              [/"([^"\\]|\\.)*$/, "string.invalid"],
+              [/"([^"\\]|\\.)*"/, "string"],
+              [/[{}[\]()]/, "delimiter"],
+              [/\$+/, "delimiter.math"],
+              [/[0-9]+(?:\.[0-9]+)?/, "number"],
+            ],
+            comment: [
+              [/[^/*]+/, "comment"],
+              [/\*\//, "comment", "@pop"],
+              [/[/*]/, "comment"],
+            ],
+          },
+        });
+      }
       // Register \begin{env} -> snippet completion (fires on '}' trigger)
       if (!envCompletionRegistered) {
         envCompletionRegistered = true;
@@ -181,6 +235,8 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
     return null;
   }
 
+  const editorLanguage = getEditorLanguage(activeEntry.name);
+
   if (!isEditableTextFile) {
     return (
       <div className="flex h-full items-center justify-center bg-ink-900">
@@ -203,7 +259,7 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
     <Editor
       key={activeFile}
       defaultValue={getFileContent(activeFile) ?? ""}
-      defaultLanguage="latex"
+      defaultLanguage={editorLanguage}
       theme="wasmtex-dark"
       onChange={handleChange}
       onMount={handleMount}

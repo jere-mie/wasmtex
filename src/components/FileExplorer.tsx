@@ -405,14 +405,14 @@ export function FileExplorer() {
           <DialogHeader>
             <DialogTitle>New File</DialogTitle>
             <DialogDescription>
-              Enter a file path. Nested folders like "figures/plot.png" are supported.
+              Enter a file path. Nested folders like "figures/plot.png" are supported, and source files can end in .tex or .typ.
             </DialogDescription>
           </DialogHeader>
           <input
             value={newFileName}
             onChange={(event) => setNewFileName(event.target.value)}
             onKeyDown={(event) => event.key === "Enter" && handleNewFile()}
-            placeholder="chapter1.tex"
+            placeholder="chapter1.tex or article.typ"
             className="w-full rounded-md border border-ink-600 bg-ink-800 px-3 py-2 text-sm font-mono text-ink-100 placeholder:text-ink-500 focus:border-amber-glow focus:outline-none"
             autoFocus
           />

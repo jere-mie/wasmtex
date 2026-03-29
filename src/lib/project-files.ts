@@ -22,6 +22,7 @@ const TEXT_EXTENSIONS = new Set([
   "ts",
   "tsx",
   "txt",
+  "typ",
   "xml",
   "yaml",
   "yml",

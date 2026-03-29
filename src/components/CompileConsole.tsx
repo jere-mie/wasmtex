@@ -1,31 +1,48 @@
 import { useRef, useEffect, useState } from "react";
-import type { CompileResponse, CompileStatusMessage } from "@/workers/tex.worker";
+import type { CompileEngine, CompileResponse, CompileStatusMessage } from "@/workers/tex.worker";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Terminal, CheckCircle2, XCircle, AlertCircle, Copy, Check, Loader2 } from "lucide-react";
 
 interface CompileConsoleProps {
   compileResult: CompileResponse | null;
+  compileEngine: CompileEngine | null;
   isCompiling: boolean;
   compilePhase: CompileStatusMessage["phase"] | null;
   compileStartTime: number | null;
 }
 
-export function CompileConsole({ compileResult, isCompiling, compilePhase, compileStartTime }: CompileConsoleProps) {
+export function CompileConsole({ compileResult, compileEngine, isCompiling, compilePhase, compileStartTime }: CompileConsoleProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
-  const [, forceUpdate] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
 
   // Tick every second while compiling so elapsed re-derives from the stable startTime prop.
   // This survives remounts: even if the component mounts mid-download it shows correct elapsed.
   useEffect(() => {
-    if (!isCompiling) return;
-    const id = setInterval(() => forceUpdate((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, [isCompiling]);
+    if (!isCompiling || compileStartTime == null) {
+      const resetId = window.setTimeout(() => setElapsed(0), 0);
+      return () => window.clearTimeout(resetId);
+    }
 
-  const elapsed = compileStartTime != null ? Math.floor((Date.now() - compileStartTime) / 1000) : 0;
+    const initialId = window.setTimeout(() => {
+      setElapsed(Math.floor((Date.now() - compileStartTime) / 1000));
+    }, 0);
+
+    const intervalId = window.setInterval(() => {
+      setElapsed(Math.floor((Date.now() - compileStartTime) / 1000));
+    }, 1000);
+
+    return () => {
+      window.clearTimeout(initialId);
+      window.clearInterval(intervalId);
+    };
+  }, [compileStartTime, isCompiling]);
 
   useEffect(() => {
+    if (!compileResult) {
+      return;
+    }
+
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [compileResult]);
 
@@ -39,6 +56,8 @@ export function CompileConsole({ compileResult, isCompiling, compilePhase, compi
 
   const isInitializing = isCompiling && compilePhase === "initializing";
   const isRunning = isCompiling && compilePhase === "compiling";
+  const currentEngine = (isCompiling ? compileEngine : compileResult?.engine ?? compileEngine) ?? "latex";
+  const currentEngineLabel = currentEngine === "typst" ? "Typst" : "LaTeX";
 
   // Fake progress: ease quickly to ~80% over 90s, then crawl toward 95%.
   // Snaps to 100% the moment the compiling phase starts.
@@ -99,7 +118,9 @@ export function CompileConsole({ compileResult, isCompiling, compilePhase, compi
             <div className="rounded-md border border-amber-glow/20 bg-amber-glow/5 p-3 space-y-2">
               <div className="flex items-center gap-2 text-amber-glow">
                 <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
-                <span className="font-semibold">Downloading TeX engine...</span>
+                <span className="font-semibold">
+                  {currentEngine === "typst" ? "Initializing Typst compiler..." : "Downloading LaTeX runtime..."}
+                </span>
                 <span className="ml-auto font-mono text-[10px] text-ink-400">
                   {Math.round(initProgress)}%
                 </span>
@@ -112,9 +133,9 @@ export function CompileConsole({ compileResult, isCompiling, compilePhase, compi
                 />
               </div>
               <p className="text-ink-400 text-[11px] leading-relaxed">
-                The TeX runtime (~430 MB) is being fetched from the server. This only happens
-                once - subsequent compiles will be fast. Please wait, this may take several
-                minutes on slower connections.
+                {currentEngine === "typst"
+                  ? "The Typst WASM runtime and default text font assets are loading. This usually happens once per browser session before the first Typst compile."
+                  : "The LaTeX runtime (~430 MB) is being fetched from the server. This only happens once, and later LaTeX compiles will be much faster."}
               </p>
             </div>
           )}
@@ -122,7 +143,7 @@ export function CompileConsole({ compileResult, isCompiling, compilePhase, compi
           {isRunning && (
             <div className="flex items-center gap-2 text-amber-glow">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              <span>Compiling document...</span>
+              <span>Compiling {currentEngineLabel} document...</span>
             </div>
           )}
 

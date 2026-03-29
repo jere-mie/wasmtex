@@ -57,7 +57,7 @@ export function Toolbar({
   const handleNewFile = () => {
     const name = newFileName.trim();
     if (!name) return;
-    createFile(name.endsWith(".tex") ? name : name + ".tex");
+    createFile(name.includes(".") ? name : `${name}.tex`);
     setNewFileName("");
     setNewFileOpen(false);
   };
@@ -214,14 +214,14 @@ export function Toolbar({
           <DialogHeader>
             <DialogTitle>New File</DialogTitle>
             <DialogDescription>
-              Enter a name for the new LaTeX file.
+              Enter a name for the new LaTeX or Typst file.
             </DialogDescription>
           </DialogHeader>
           <input
             value={newFileName}
             onChange={(e) => setNewFileName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleNewFile()}
-            placeholder="chapter1.tex"
+            placeholder="chapter1.tex or article.typ"
             className="w-full px-3 py-2 rounded-md bg-ink-800 border border-ink-600 text-ink-100 text-sm font-mono focus:outline-none focus:border-amber-glow placeholder:text-ink-500"
             autoFocus
           />

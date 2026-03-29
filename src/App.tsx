@@ -11,9 +11,12 @@ import type { CompileResponse, CompileStatusMessage } from "@/workers/tex.worker
 import { cn } from "@/lib/utils";
 import {
   collectProjectImportFromDataTransfer,
+  getFileExtension,
   hasFileDrag,
 } from "@/lib/project-files";
+import type { VFSFile } from "@/lib/project-files";
 import { FolderOpen, FileText, Eye } from "lucide-react";
+import type { CompileEngine } from "@/workers/tex.worker";
 
 const HANDLE_SIZE = 4;
 const MIN_SIDEBAR_WIDTH = 88;
@@ -30,6 +33,60 @@ const AUTO_COMPILE_DELAY_MS = 700;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function getCompileEngineForFile(fileName: string): CompileEngine | null {
+  const extension = getFileExtension(fileName);
+
+  if (extension === "tex") {
+    return "latex";
+  }
+
+  if (extension === "typ") {
+    return "typst";
+  }
+
+  return null;
+}
+
+function getCompiledPdfName(fileName: string) {
+  return fileName.replace(/\.(tex|typ)$/i, ".pdf");
+}
+
+function pickCompileTarget(
+  files: Array<Pick<VFSFile, "name">>,
+  activeFile: string | null
+) {
+  const activeEngine = activeFile ? getCompileEngineForFile(activeFile) : null;
+  if (activeFile && activeEngine) {
+    return {
+      engine: activeEngine,
+      mainFile: activeFile,
+      pdfName: getCompiledPdfName(activeFile),
+    };
+  }
+
+  for (const candidate of ["main.tex", "main.typ"]) {
+    const engine = getCompileEngineForFile(candidate);
+    if (engine && files.some((file) => file.name === candidate)) {
+      return {
+        engine,
+        mainFile: candidate,
+        pdfName: getCompiledPdfName(candidate),
+      };
+    }
+  }
+
+  const fallback = files.find((file) => getCompileEngineForFile(file.name));
+  if (!fallback) {
+    return null;
+  }
+
+  return {
+    engine: getCompileEngineForFile(fallback.name) as CompileEngine,
+    mainFile: fallback.name,
+    pdfName: getCompiledPdfName(fallback.name),
+  };
 }
 
 function ResizeHandle({
@@ -88,6 +145,7 @@ function App() {
   const { files, activeFile, importFiles } = useFiles();
   const [compileResult, setCompileResult] = useState<CompileResponse | null>(null);
   const [compiledPdfName, setCompiledPdfName] = useState<string>("document.pdf");
+  const [compileEngine, setCompileEngine] = useState<CompileEngine | null>(null);
   const [isCompiling, setIsCompiling] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [autoCompile, setAutoCompile] = useState<boolean>(() => {
@@ -119,15 +177,17 @@ function App() {
 
   const handleCompileResult = useCallback((result: CompileResponse) => {
     setCompileResult(result);
+    setCompileEngine(result.engine);
     setIsCompiling(false);
     setCompilePhase(null);
     setCompileStartTime(null);
+    const engineLabel = result.engine === "latex" ? "LaTeX" : "Typst";
     if (result.success) {
-      toast.success("Compilation successful", {
-        description: "Document built without errors.",
+      toast.success(`${engineLabel} compilation successful`, {
+        description: `${result.mainFile} built without errors.`,
       });
     } else {
-      toast.error("Compilation failed", {
+      toast.error(`${engineLabel} compilation failed`, {
         description: `${result.errors.length} error(s) found.`,
       });
     }
@@ -136,7 +196,16 @@ function App() {
   const handleCompile = useCallback(() => {
     if (isCompiling) return;
 
+    const target = pickCompileTarget(files, activeFile);
+    if (!target) {
+      toast.error("No compilable source file", {
+        description: "Add or select a .tex or .typ file to compile.",
+      });
+      return;
+    }
+
     lastCompileVersionRef.current = projectVersion;
+    setCompileEngine(target.engine);
     setIsCompiling(true);
     setCompileStartTime(Date.now());
 
@@ -148,13 +217,7 @@ function App() {
     }
 
     const worker = workerRef.current;
-    const mainFile =
-      activeFile ??
-      files.find((file) => file.name === "main.tex")?.name ??
-      files[0]?.name ??
-      "main.tex";
-    const pdfName = mainFile.replace(/\.tex$/i, ".pdf");
-    setCompiledPdfName(pdfName);
+    setCompiledPdfName(target.pdfName);
 
     worker.onmessage = (event: MessageEvent<CompileResponse | CompileStatusMessage>) => {
       if (event.data.type === "compile-status") {
@@ -166,8 +229,9 @@ function App() {
 
     worker.postMessage({
       type: "compile",
+      engine: target.engine,
       files: files.map((file) => ({ name: file.name, content: file.content })),
-      mainFile,
+      mainFile: target.mainFile,
     });
   }, [activeFile, files, handleCompileResult, isCompiling, projectVersion]);
 
@@ -459,7 +523,7 @@ function App() {
                   <PdfPreview compileResult={compileResult} pdfName={compiledPdfName} />
                 </div>
                 <div className="shrink-0" style={{ height: 180 }}>
-                  <CompileConsole compileResult={compileResult} isCompiling={isCompiling} compilePhase={compilePhase} compileStartTime={compileStartTime} />
+                  <CompileConsole compileResult={compileResult} compileEngine={compileEngine} isCompiling={isCompiling} compilePhase={compilePhase} compileStartTime={compileStartTime} />
                 </div>
               </div>
             )}
@@ -518,7 +582,7 @@ function App() {
             </div>
             <ResizeHandle orientation="vertical" onPointerDown={beginVerticalResize} />
             <div className="min-h-0 shrink-0" style={{ height: consoleHeight }}>
-              <CompileConsole compileResult={compileResult} isCompiling={isCompiling} compilePhase={compilePhase} compileStartTime={compileStartTime} />
+              <CompileConsole compileResult={compileResult} compileEngine={compileEngine} isCompiling={isCompiling} compilePhase={compilePhase} compileStartTime={compileStartTime} />
             </div>
           </div>
         </div>

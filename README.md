@@ -2,9 +2,9 @@
 
 # WasmTeX
 
-### A privacy-first, browser-based LaTeX editor powered by WebAssembly.
+### A privacy-first, browser-based LaTeX and Typst editor powered by WebAssembly.
 
-Write, compile, and preview LaTeX documents - entirely in your browser. No server. No install. No data leaves your machine.
+Write, compile, and preview LaTeX or Typst documents - entirely in your browser. No server. No install. No document data leaves your machine.
 
 **[Launch Editor →](https://latex.zxcv.fyi)**
 
@@ -76,7 +76,7 @@ npm run build
 - **Full IDE Layout** - Resizable 3-panel design: file explorer, tabbed editor, and PDF preview with console
 - **Monaco Editor** - VS Code's editor engine with custom LaTeX syntax highlighting and a bespoke dark theme
 - **Virtual File System** - Create, rename, and delete `.tex` files with automatic IndexedDB persistence
-- **BusyTeX PDF Compilation** - PdfLaTeX runs in the browser via WebAssembly and renders a real PDF preview
+- **Dual PDF Compilation** - LaTeX compiles through BusyTeX and Typst compiles through Typst.ts, both entirely in the browser
 - **Web Worker Compilation** - TeX runs off the main thread for a responsive editing experience
 - **Zero Backend** - Everything happens client-side. Your documents never leave your browser
 
