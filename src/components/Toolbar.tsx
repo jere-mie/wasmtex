@@ -18,6 +18,7 @@ import {
   Download,
   FolderOpen,
   Settings,
+  Trash2,
 } from "lucide-react";
 import { buildZip } from "@/lib/zip";
 import { collectProjectImportFromFileList } from "@/lib/project-files";
@@ -41,9 +42,11 @@ export function Toolbar({
   onSettingsOpenChange,
 }: ToolbarProps) {
   const { createFile, importFiles, files } = useFiles();
+  const { resetToDefaults } = useFiles();
   const [newFileOpen, setNewFileOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [newFileName, setNewFileName] = useState("");
+  const [confirmClear, setConfirmClear] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const uploadDirectoryRef = useRef<HTMLInputElement | null>(null);
 
@@ -318,6 +321,51 @@ export function Toolbar({
             <p className="mt-3 text-xs text-ink-500">
               When enabled, WasmTeX waits briefly after changes before compiling to avoid recompiling on every keystroke.
             </p>
+          </div>
+
+          <div className="rounded-lg border border-error/30 bg-ink-900/70 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <h3 className="text-sm font-medium text-ink-100">Clear filesystem</h3>
+                <p className="text-sm text-ink-400">
+                  Delete all project files and restore the two default starter files.
+                </p>
+              </div>
+              {confirmClear ? (
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmClear(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-error text-ink-950 hover:bg-error/80"
+                    onClick={async () => {
+                      setConfirmClear(false);
+                      await resetToDefaults();
+                      toast.success("Filesystem cleared", {
+                        description: "Restored default main.tex and main.typ.",
+                      });
+                    }}
+                  >
+                    Confirm
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 gap-1.5 border-error/40 text-error hover:bg-error/10 hover:text-error"
+                  onClick={() => setConfirmClear(true)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Clear
+                </Button>
+              )}
+            </div>
           </div>
           </div>
 

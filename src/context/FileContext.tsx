@@ -6,7 +6,7 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
-import { get, set, del, keys } from "idb-keyval";
+import { get, set, del, keys, clear } from "idb-keyval";
 import {
   type VFSFile,
   getAncestorFolders,
@@ -98,12 +98,15 @@ interface FileContextType {
   updateFileContent: (name: string, content: string) => void;
   getFile: (name: string) => VFSFile | undefined;
   getFileContent: (name: string) => string | undefined;
+  resetToDefaults: () => Promise<void>;
 }
 
 const FileContext = createContext<FileContextType | null>(null);
 
 const IDB_PREFIX = "wasmtex:";
 const IDB_FOLDERS_KEY = `${IDB_PREFIX}__folders__`;
+const LS_OPEN_FILES_KEY = "wasmtex:open-files";
+const LS_ACTIVE_FILE_KEY = "wasmtex:active-file";
 
 function sortFiles(nextFiles: VFSFile[]) {
   return [...nextFiles].sort((left, right) => left.name.localeCompare(right.name));
@@ -214,12 +217,33 @@ export function FileProvider({ children }: { children: ReactNode }) {
 
         setFiles(nextFiles);
         setFolders(nextFolders);
-        setActiveFile(nextFiles[0]?.name ?? null);
-        setOpenFiles([nextFiles[0]?.name].filter(Boolean) as string[]);
+
+        // Restore open files from localStorage, filtering out any that no longer exist
+        const fileNames = new Set(nextFiles.map((f) => f.name));
+        const savedOpen = JSON.parse(localStorage.getItem(LS_OPEN_FILES_KEY) ?? "null") as string[] | null;
+        const savedActive = localStorage.getItem(LS_ACTIVE_FILE_KEY);
+        const restoredOpen = savedOpen?.filter((n) => fileNames.has(n));
+        const nextOpen = restoredOpen && restoredOpen.length > 0 ? restoredOpen : [nextFiles[0]?.name].filter(Boolean) as string[];
+        const nextActive = savedActive && fileNames.has(savedActive) ? savedActive : (nextOpen[0] ?? null);
+        setOpenFiles(nextOpen);
+        setActiveFile(nextActive);
       }
       setLoaded(true);
     })();
   }, []);
+
+  // Persist open files and active file to localStorage after initial load
+  useEffect(() => {
+    if (!loaded) return;
+    localStorage.setItem(LS_OPEN_FILES_KEY, JSON.stringify(openFiles));
+  }, [openFiles, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    if (activeFile !== null) {
+      localStorage.setItem(LS_ACTIVE_FILE_KEY, activeFile);
+    }
+  }, [activeFile, loaded]);
 
   const persistFile = useCallback(async (file: VFSFile) => {
     await set(IDB_PREFIX + file.name, serializeFile(file));
@@ -456,6 +480,19 @@ export function FileProvider({ children }: { children: ReactNode }) {
     [files]
   );
 
+  const resetToDefaults = useCallback(async () => {
+    // Wipe everything from IndexedDB then re-seed with the two default files
+    await clear();
+    const texFile: VFSFile = { name: "main.tex", content: DEFAULT_MAIN_TEX, kind: "text" };
+    const typFile: VFSFile = { name: "main.typ", content: DEFAULT_MAIN_TYP, kind: "text" };
+    await set(IDB_PREFIX + "main.tex", serializeFile(texFile));
+    await set(IDB_PREFIX + "main.typ", serializeFile(typFile));
+    setFiles([texFile, typFile]);
+    setFolders([]);
+    setOpenFiles(["main.tex", "main.typ"]);
+    setActiveFile("main.tex");
+  }, []);
+
   const openFile = useCallback(
     (name: string) => {
       setOpenFiles((prev) => (prev.includes(name) ? prev : [...prev, name]));
@@ -501,6 +538,7 @@ export function FileProvider({ children }: { children: ReactNode }) {
         updateFileContent,
         getFile,
         getFileContent,
+        resetToDefaults,
       }}
     >
       {children}
