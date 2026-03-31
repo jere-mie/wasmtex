@@ -5,6 +5,9 @@ import {
   createTypstCompiler,
   type TypstCompiler,
 } from "@myriaddreamin/typst.ts/compiler";
+import { withPackageRegistry, withAccessModel } from "@myriaddreamin/typst.ts/options.init";
+import { MemoryAccessModel } from "@myriaddreamin/typst.ts/fs/memory";
+import { FetchPackageRegistry } from "@myriaddreamin/typst.ts/fs/package";
 import typstCompilerWasmUrl from "@myriaddreamin/typst-ts-web-compiler/wasm?url";
 import type { VFSFile } from "@/lib/project-files";
 
@@ -58,6 +61,8 @@ const runner = new BusyTexRunner({
 });
 
 const typstCompiler: TypstCompiler = createTypstCompiler();
+const typstPackageAccessModel = new MemoryAccessModel();
+const typstPackageRegistry = new FetchPackageRegistry(typstPackageAccessModel);
 
 const DRIVER_ORDER = [
   "xetex_bibtex8_dvipdfmx",
@@ -84,6 +89,8 @@ function ensureTypstCompilerReady() {
     typstReady = typstCompiler
       .init({
         beforeBuild: [
+          withAccessModel(typstPackageAccessModel),
+          withPackageRegistry(typstPackageRegistry),
           loadFonts([], {
             assets: ["text"],
             assetUrlPrefix: TYPST_FONT_ASSET_PATH,

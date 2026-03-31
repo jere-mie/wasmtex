@@ -8,9 +8,10 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { Shuffle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/context/ThemeContext';
-import { buildThemeFromColors, generateThemeColors, THEME_COLOR_KEYS } from '@/lib/themes';
+import { buildThemeFromColors, generateThemeColors, hslToHex, THEME_COLOR_KEYS } from '@/lib/themes';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,39 @@ interface BuilderProps {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+
+/** Generates a random aesthetically-pleasing bg/text/accent triple. */
+function randomColors(dark: boolean): { bg: string; text: string; accent: string } {
+  const rand = (min: number, max: number) => Math.random() * (max - min) + min;
+  const bgHue    = Math.random() * 360;
+  // accent hue is 120–200° away from bg so it's clearly distinct
+  const accentHue = (bgHue + rand(120, 200)) % 360;
+  if (dark) {
+    const bgS      = rand(5, 20);   // low saturation for dark bg
+    const bgL      = rand(4, 14);
+    const textS    = rand(5, 25);
+    const textL    = rand(78, 92);
+    const accentS  = rand(55, 90);
+    const accentL  = rand(55, 72);
+    return {
+      bg:     hslToHex(bgHue,    bgS,    bgL),
+      text:   hslToHex(bgHue,    textS,  textL),
+      accent: hslToHex(accentHue, accentS, accentL),
+    };
+  } else {
+    const bgS      = rand(0, 15);
+    const bgL      = rand(92, 98);
+    const textS    = rand(5, 20);
+    const textL    = rand(8, 22);
+    const accentS  = rand(55, 85);
+    const accentL  = rand(35, 52);
+    return {
+      bg:     hslToHex(bgHue,    bgS,    bgL),
+      text:   hslToHex(bgHue,    textS,  textL),
+      accent: hslToHex(accentHue, accentS, accentL),
+    };
+  }
+}
 
 /** Creates a slug-like id from a string + timestamp suffix. */
 function makeThemeId(name: string): string {
@@ -110,6 +144,13 @@ export function ThemeBuilder({ open, onOpenChange }: BuilderProps) {
     setThemeId(theme.id);
     toast.success(`Theme "${trimmed}" saved`);
     onOpenChange(false);
+  };
+
+  const handleRandomize = () => {
+    const { bg, text, accent } = randomColors(isDark);
+    setBgColor(bg);
+    setTextColor(text);
+    setAccent(accent);
   };
 
   const handleClose = () => onOpenChange(false);
@@ -231,6 +272,10 @@ export function ThemeBuilder({ open, onOpenChange }: BuilderProps) {
         </div>
 
         <DialogFooter>
+          <Button variant="outline" onClick={handleRandomize} className="mr-auto gap-1.5">
+            <Shuffle className="h-3.5 w-3.5" />
+            Randomize
+          </Button>
           <Button variant="outline" onClick={handleClose}>Cancel</Button>
           <Button onClick={handleSave}>Save Theme</Button>
         </DialogFooter>
