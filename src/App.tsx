@@ -7,6 +7,7 @@ import { MonacoEditor } from "@/components/MonacoEditor";
 import { PdfPreview } from "@/components/PdfPreview";
 import { CompileConsole } from "@/components/CompileConsole";
 import { useFiles } from "@/context/FileContext";
+import { useTheme } from "@/context/ThemeContext";
 import type { CompileResponse, CompileStatusMessage } from "@/workers/tex.worker";
 import { cn } from "@/lib/utils";
 import {
@@ -143,6 +144,7 @@ function ResizeHandle({
 
 function App() {
   const { files, activeFile, importFiles } = useFiles();
+  const { activeTheme } = useTheme();
   const [compileResult, setCompileResult] = useState<CompileResponse | null>(null);
   const [compiledPdfName, setCompiledPdfName] = useState<string>("document.pdf");
   const [compileEngine, setCompileEngine] = useState<CompileEngine | null>(null);
@@ -600,7 +602,7 @@ function App() {
       )}
 
       <Toaster
-        theme="dark"
+        theme={activeTheme.isDark ? "dark" : "light"}
         position="bottom-right"
         toastOptions={{
           style: {

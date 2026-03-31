@@ -3,6 +3,8 @@ import Editor, { type OnMount } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
 import type { editor } from "monaco-editor";
 import { useFiles } from "@/context/FileContext";
+import { useTheme } from "@/context/ThemeContext";
+import { BUILTIN_THEMES, getMonacoThemeId } from "@/lib/themes";
 import {
   getFileExtension,
   getVFSFileSize,
@@ -13,8 +15,115 @@ import {
 // Store Monaco models per file to preserve undo history
 const modelCache = new Map<string, editor.ITextModel>();
 
-// Guard: only register the \begin completion provider once across remounts
+// Guard: only register providers once across remounts
 let envCompletionRegistered = false;
+let latexRegistered = false;
+let typstRegistered = false;
+
+const LATEX_LANGUAGE_CONFIGURATION: monaco.languages.LanguageConfiguration = {
+  comments: { lineComment: "%" },
+  brackets: [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+  ],
+  autoClosingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: "(", close: ")" },
+    { open: "$", close: "$" },
+  ],
+  surroundingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: "(", close: ")" },
+    { open: "$", close: "$" },
+  ],
+};
+
+/**
+ * Rich LaTeX tokenizer. All token names map to explicit entries in the
+ * WasmTeX Monaco theme rules, so custom themes render correctly.
+ *
+ * Token name → theme rule mapping:
+ *   comment           → comment (italic)
+ *   keyword.control   → \begin, \end, \newcommand, \def, …
+ *   markup.heading    → \section, \chapter, …
+ *   markup.list       → \item
+ *   markup.emphasis   → \textbf, \textit, \emph, …
+ *   function          → \cite, \ref, \label, \eqref, …
+ *   namespace         → \usepackage, \documentclass, \input, …
+ *   keyword           → all other \commands
+ *   escape            → \\ \& \% \$ special char escapes
+ *   delimiter         → { } [ ]  (replaces non-themed delimiter.curly/square)
+ *   operator          → & ^ _ ~ = + - * / < > | math operators
+ *   number            → numeric literals
+ *   type              → identifiers inside math mode
+ *   attribute.name    → environment names and optional-arg keys
+ *   string.raw        → display math content marker ($$ … $$)
+ */
+const LATEX_TOKENIZER: monaco.languages.IMonarchLanguage = {
+  defaultToken: "",
+  tokenPostfix: ".tex",
+  tokenizer: {
+    root: [
+      // Comments
+      [/%.*$/, "comment"],
+      // Display math $$...$$
+      [/\$\$/, "string.raw", "@mathDisplay"],
+      // Inline math $...$
+      [/\$/, "operator", "@mathInline"],
+      // \begin{env} / \end{env}
+      [/(\\(?:begin|end)\*?)(\s*)(\{)([^}]*)(\})/, [
+        "keyword.control", "", "delimiter", "attribute.name", "delimiter",
+      ]],
+      // \begin / \end without braces yet (fallback)
+      [/\\(?:begin|end)\*?\b/, "keyword.control"],
+      // Definition / new-command control
+      [/\\(?:newcommand|renewcommand|newenvironment|renewenvironment|providecommand|def|let|gdef|edef|xdef|newcounter|setcounter|addtocounter|stepcounter)\*?\b/, "keyword.control"],
+      // Structural / heading commands
+      [/\\(?:part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?\b/, "markup.heading"],
+      // List item
+      [/\\item\b/, "markup.list"],
+      // Emphasis / formatting commands
+      [/\\(?:textbf|textit|emph|textsc|texttt|textrm|textup|textsl|underline|footnote|footnotemark|footnotetext|text)\*?\b/, "markup.emphasis"],
+      // Cross-reference commands
+      [/\\(?:cite[a-zA-Z]*|(?:eq|auto|page|v)?ref|label)\*?\b/, "function"],
+      // Include / package commands
+      [/\\(?:usepackage|RequirePackage|documentclass|input|include|includegraphics|bibliography|bibliographystyle|addbibresource)\*?\b/, "namespace"],
+      // Special character escapes:  \\ \& \% \$ \# \_ \{ \} \~ \^
+      [/\\[\\&%$#_{}~^]/, "escape"],
+      // All other backslash commands
+      [/\\[a-zA-Z@]+\*?/, "keyword"],
+      // Braces and brackets
+      [/[{}[\]]/, "delimiter"],
+      // Math operators inline (alignment, super/subscript, etc.)
+      [/[&^_~]/, "operator"],
+      // Numbers
+      [/[0-9]+(?:\.[0-9]+)?/, "number"],
+    ],
+    mathDisplay: [
+      [/\$\$/, "string.raw", "@pop"],
+      [/\\[a-zA-Z@]+\*?/, "keyword"],
+      [/\\[\\&%$#_{}~^]/, "escape"],
+      [/[{}[\]()]/, "delimiter"],
+      [/[\^_]/, "operator"],
+      [/[+\-*/=<>!,;|]/, "operator"],
+      [/[0-9]+(?:\.[0-9]+)?/, "number"],
+      [/[a-zA-Z]+/, "type"],
+    ],
+    mathInline: [
+      [/\$/, "operator", "@pop"],
+      [/\\[a-zA-Z@]+\*?/, "keyword"],
+      [/\\[\\&%$#_{}~^]/, "escape"],
+      [/[{}[\]()]/, "delimiter"],
+      [/[\^_]/, "operator"],
+      [/[+\-*/=<>!,;|]/, "operator"],
+      [/[0-9]+(?:\.[0-9]+)?/, "number"],
+      [/[a-zA-Z]+/, "type"],
+    ],
+  },
+};
 
 const TYPST_LANGUAGE_CONFIGURATION: monaco.languages.LanguageConfiguration = {
   comments: {
@@ -195,11 +304,21 @@ function getEditorLanguage(fileName: string) {
 
 export function MonacoEditor({ onCompile }: MonacoEditorProps) {
   const { activeFile, getFile, getFileContent, updateFileContent } = useFiles();
+  const { activeTheme, userThemes } = useTheme();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const fontRefreshCleanupRef = useRef<(() => void) | null>(null);
   const onCompileRef = useRef(onCompile);
   useEffect(() => { onCompileRef.current = onCompile; }, [onCompile]);
   useEffect(() => () => { fontRefreshCleanupRef.current?.(); }, []);
+
+  // Register all themes and apply the active one whenever it changes
+  useEffect(() => {
+    const allThemes = [...BUILTIN_THEMES, ...userThemes];
+    for (const theme of allThemes) {
+      monaco.editor.defineTheme(getMonacoThemeId(theme.id), theme.monacoTheme);
+    }
+    monaco.editor.setTheme(getMonacoThemeId(activeTheme.id));
+  }, [activeTheme, userThemes]);
 
   const activeEntry = activeFile ? getFile(activeFile) : undefined;
   const isEditableTextFile = activeEntry ? isTextFile(activeEntry) : false;
@@ -232,80 +351,22 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
       });
 
 
-      // Define custom LaTeX-inspired theme
-      monaco.editor.defineTheme("wasmtex-dark", {
-        base: "vs-dark",
-        inherit: true,
-        rules: [
-          { token: "comment", foreground: "6b6080", fontStyle: "italic" },
-          { token: "keyword", foreground: "d4a574" },
-          { token: "keyword.control", foreground: "f59e0b" },
-          { token: "string", foreground: "4ade80" },
-          { token: "string.raw", foreground: "86efac" },
-          { token: "number", foreground: "e8c49a" },
-          { token: "type", foreground: "c4b5fd" },
-          { token: "type.identifier", foreground: "c4b5fd" },
-          { token: "function", foreground: "7dd3fc" },
-          { token: "namespace", foreground: "67e8f9" },
-          { token: "operator", foreground: "f1f5f9" },
-          { token: "escape", foreground: "c4b5fd" },
-          { token: "markup.heading", foreground: "fbbf24", fontStyle: "bold" },
-          { token: "markup.list", foreground: "8e85a3" },
-          { token: "markup.emphasis", foreground: "f9a8d4" },
-          { token: "delimiter", foreground: "8e85a3" },
-          { token: "tag", foreground: "d4a574" },
-          { token: "attribute.name", foreground: "e8c49a" },
-          { token: "attribute.value", foreground: "4ade80" },
-        ],
-        colors: {
-          "editor.background": "#0c0a0f",
-          "editor.foreground": "#ddd9e8",
-          "editor.lineHighlightBackground": "#17141c",
-          "editor.selectionBackground": "#d4a57430",
-          "editor.inactiveSelectionBackground": "#d4a57415",
-          "editorCursor.foreground": "#d4a574",
-          "editorLineNumber.foreground": "#504866",
-          "editorLineNumber.activeForeground": "#d4a574",
-          "editorIndentGuide.background": "#1c1922",
-          "editorIndentGuide.activeBackground": "#342e40",
-          "editorBracketMatch.background": "#d4a57420",
-          "editorBracketMatch.border": "#d4a57460",
-          "editor.wordHighlightBackground": "#d4a57415",
-          "editorWidget.background": "#100e14",
-          "editorWidget.border": "#342e40",
-          "editorSuggestWidget.background": "#100e14",
-          "editorSuggestWidget.border": "#342e40",
-          "editorSuggestWidget.selectedBackground": "#1c1922",
-          "input.background": "#17141c",
-          "input.border": "#342e40",
-          "input.foreground": "#ddd9e8",
-          "scrollbar.shadow": "#00000000",
-          "scrollbarSlider.background": "#504866",
-          "scrollbarSlider.hoverBackground": "#6b6080",
-          "scrollbarSlider.activeBackground": "#8e85a3",
-        },
-      });
-
-      monaco.editor.setTheme("wasmtex-dark");
-
-      // Register LaTeX language (basic)
-      if (!monaco.languages.getLanguages().some((l: { id: string }) => l.id === "latex")) {
-        monaco.languages.register({ id: "latex" });
-        monaco.languages.setMonarchTokensProvider("latex", {
-          tokenizer: {
-            root: [
-              [/%.*$/, "comment"],
-              [/\\[a-zA-Z@]+/, "keyword"],
-              [/[{}]/, "delimiter.curly"],
-              [/[[\]]/, "delimiter.square"],
-              [/\$\$?/, "delimiter.math"],
-              [/[&]/, "delimiter"],
-              [/[0-9]+/, "number"],
-            ],
-          },
-        });
+      // Register all built-in + user themes and apply the active one
+      const allThemes = [...BUILTIN_THEMES, ...userThemes];
+      for (const theme of allThemes) {
+        monaco.editor.defineTheme(getMonacoThemeId(theme.id), theme.monacoTheme);
       }
-      if (!monaco.languages.getLanguages().some((l: { id: string }) => l.id === "typst")) {
+      monaco.editor.setTheme(getMonacoThemeId(activeTheme.id));
+
+      // Register LaTeX language
+      if (!latexRegistered && !monaco.languages.getLanguages().some((l: { id: string }) => l.id === "latex")) {
+        latexRegistered = true;
+        monaco.languages.register({ id: "latex" });
+        monaco.languages.setLanguageConfiguration("latex", LATEX_LANGUAGE_CONFIGURATION);
+        monaco.languages.setMonarchTokensProvider("latex", LATEX_TOKENIZER);
+      }
+      if (!typstRegistered && !monaco.languages.getLanguages().some((l: { id: string }) => l.id === "typst")) {
+        typstRegistered = true;
         monaco.languages.register({ id: "typst" });
         monaco.languages.setLanguageConfiguration("typst", TYPST_LANGUAGE_CONFIGURATION);
         monaco.languages.setMonarchTokensProvider("typst", TYPST_TOKENIZER);
@@ -409,7 +470,7 @@ export function MonacoEditor({ onCompile }: MonacoEditorProps) {
       key={activeFile}
       defaultValue={getFileContent(activeFile) ?? ""}
       defaultLanguage={editorLanguage}
-      theme="wasmtex-dark"
+      theme={getMonacoThemeId(activeTheme.id)}
       onChange={handleChange}
       onMount={handleMount}
       options={{

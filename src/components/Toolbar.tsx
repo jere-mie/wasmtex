@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { buildZip } from "@/lib/zip";
 import { collectProjectImportFromFileList } from "@/lib/project-files";
+import { ThemePanel } from "@/components/ThemePanel";
 
 interface ToolbarProps {
   onCompile: () => void;
@@ -275,13 +276,18 @@ export function Toolbar({
       </Dialog>
 
       <Dialog open={isSettingsOpen} onOpenChange={onSettingsOpenChange}>
-        <DialogContent>
+        <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>Settings</DialogTitle>
             <DialogDescription>
               Configure editor behavior for your current browser session and saved workspace preferences.
             </DialogDescription>
           </DialogHeader>
+
+          <div className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
+            <div className="rounded-lg border border-ink-700 bg-ink-900/70 p-4">
+              <ThemePanel />
+            </div>
 
           <div className="rounded-lg border border-ink-700 bg-ink-900/70 p-4">
             <div className="flex items-start justify-between gap-4">
@@ -312,6 +318,7 @@ export function Toolbar({
             <p className="mt-3 text-xs text-ink-500">
               When enabled, WasmTeX waits briefly after changes before compiling to avoid recompiling on every keystroke.
             </p>
+          </div>
           </div>
 
           <DialogFooter>
