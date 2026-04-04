@@ -146,6 +146,8 @@ function App() {
   const { files, activeFile, importFiles } = useFiles();
   const { activeTheme } = useTheme();
   const [compileResult, setCompileResult] = useState<CompileResponse | null>(null);
+  const [previewPdf, setPreviewPdf] = useState<Uint8Array | null>(null);
+  const [isPreviewStale, setIsPreviewStale] = useState(false);
   const [compiledPdfName, setCompiledPdfName] = useState<string>("document.pdf");
   const [compileEngine, setCompileEngine] = useState<CompileEngine | null>(null);
   const [isCompiling, setIsCompiling] = useState(false);
@@ -167,6 +169,7 @@ function App() {
   const workerRef = useRef<Worker | null>(null);
   const dragDepthRef = useRef(0);
   const lastCompileVersionRef = useRef<string | null>(null);
+  const previewPdfRef = useRef<Uint8Array | null>(null);
 
   const projectVersion = files
     .map((file) => {
@@ -183,6 +186,16 @@ function App() {
     setIsCompiling(false);
     setCompilePhase(null);
     setCompileStartTime(null);
+
+    if (result.success && result.pdf) {
+      const bytes = result.pdf as Uint8Array;
+      previewPdfRef.current = bytes;
+      setPreviewPdf(bytes);
+      setIsPreviewStale(false);
+    } else {
+      setIsPreviewStale(previewPdfRef.current !== null);
+    }
+
     const engineLabel = result.engine === "latex" ? "LaTeX" : "Typst";
     if (result.success) {
       toast.success(`${engineLabel} compilation successful`, {
@@ -522,7 +535,7 @@ function App() {
             {mobileTab === "preview" && (
               <div className="flex h-full min-h-0 flex-col">
                 <div className="flex-1 min-h-0">
-                  <PdfPreview compileResult={compileResult} pdfName={compiledPdfName} />
+                  <PdfPreview pdfData={previewPdf} isStale={isPreviewStale} pdfName={compiledPdfName} />
                 </div>
                 <div className="shrink-0" style={{ height: 180 }}>
                   <CompileConsole compileResult={compileResult} compileEngine={compileEngine} isCompiling={isCompiling} compilePhase={compilePhase} compileStartTime={compileStartTime} />
@@ -580,7 +593,7 @@ function App() {
               className="min-h-0 flex-1"
               style={{ height: `calc(100% - ${consoleHeight + HANDLE_SIZE}px)` }}
             >
-              <PdfPreview compileResult={compileResult} pdfName={compiledPdfName} />
+              <PdfPreview pdfData={previewPdf} isStale={isPreviewStale} pdfName={compiledPdfName} />
             </div>
             <ResizeHandle orientation="vertical" onPointerDown={beginVerticalResize} />
             <div className="min-h-0 shrink-0" style={{ height: consoleHeight }}>

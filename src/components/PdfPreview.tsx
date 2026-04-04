@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
-import type { CompileResponse } from "@/workers/tex.worker";
 import { AlertTriangle, FileText, ZoomIn, ZoomOut, RotateCw, Download } from "lucide-react";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -14,41 +13,168 @@ const ZOOM_STEP = 0.2;
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 3.0;
 const ZOOM_DEFAULT = 1.0;
+const PAGE_VISIBILITY_OFFSET = 8;
+
+interface ScrollSnapshot {
+  pageIndex: number;
+  pageProgress: number;
+  scrollRatio: number;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
 
 interface PdfPreviewProps {
-  compileResult: CompileResponse | null;
+  pdfData: Uint8Array | null;
+  isStale: boolean;
   pdfName?: string;
 }
 
-export function PdfPreview({ compileResult, pdfName = "document.pdf" }: PdfPreviewProps) {
-  const [displayPdf, setDisplayPdf] = useState<Uint8Array | null>(null);
-  const [isStale, setIsStale] = useState(false);
+export function PdfPreview({ pdfData, isStale, pdfName = "document.pdf" }: PdfPreviewProps) {
   const [numPages, setNumPages] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
   const [zoom, setZoom] = useState(ZOOM_DEFAULT);
   const [rotation, setRotation] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const pageRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const pendingScrollRestoreRef = useRef<ScrollSnapshot | null>(null);
+  const renderedPagesRef = useRef<Set<number>>(new Set());
+  const restoreFrameRef = useRef<number | null>(null);
+  const numPagesRef = useRef(0);
+  const previousPdfRef = useRef<Uint8Array | null>(null);
 
   // Keep a raw-bytes ref purely for download - never passed to PDF.js
   const downloadBytesRef = useRef<Uint8Array | null>(null);
 
   const pdfFile = useMemo(
-    () => (displayPdf ? { data: displayPdf.slice() } : null),
-    [displayPdf]
+    () => (pdfData ? { data: pdfData.slice() } : null),
+    [pdfData]
   );
 
-  useEffect(() => {
-    if (!compileResult) return;
+  function captureScrollSnapshot(): ScrollSnapshot | null {
+    const container = containerRef.current;
+    if (!container) return null;
 
-    if (compileResult.success && compileResult.pdf) {
-      const bytes = compileResult.pdf as Uint8Array;
-      downloadBytesRef.current = bytes;
-      setDisplayPdf(bytes);
-      setIsStale(false);
-    } else if (!compileResult.success) {
-      setIsStale(true);
+    const maxScrollTop = Math.max(container.scrollHeight - container.clientHeight, 0);
+    const scrollRatio = maxScrollTop === 0 ? 0 : container.scrollTop / maxScrollTop;
+    const pages = pageRefs.current.filter((page): page is HTMLDivElement => page !== null);
+
+    if (pages.length === 0) {
+      return {
+        pageIndex: 0,
+        pageProgress: 0,
+        scrollRatio,
+      };
     }
-  }, [compileResult]);
+
+    let safePageIndex = 0;
+    for (let index = 0; index < pages.length; index += 1) {
+      if (pages[index].offsetTop <= container.scrollTop + PAGE_VISIBILITY_OFFSET) {
+        safePageIndex = index;
+      } else {
+        break;
+      }
+    }
+
+    const page = pages[safePageIndex];
+    const pageProgress = page.offsetHeight === 0
+      ? 0
+      : clamp((container.scrollTop - page.offsetTop) / page.offsetHeight, 0, 1);
+
+    return {
+      pageIndex: safePageIndex,
+      pageProgress,
+      scrollRatio,
+    };
+  }
+
+  function restoreScrollSnapshot(snapshot: ScrollSnapshot) {
+    const container = containerRef.current;
+    if (!container) return false;
+
+    const maxScrollTop = Math.max(container.scrollHeight - container.clientHeight, 0);
+    const targetPageIndex = Math.min(snapshot.pageIndex, pageRefs.current.length - 1);
+    const targetPage = targetPageIndex >= 0 ? pageRefs.current[targetPageIndex] : null;
+
+    if (targetPage && targetPage.offsetHeight > 0) {
+      const targetScrollTop = clamp(
+        targetPage.offsetTop + targetPage.offsetHeight * snapshot.pageProgress,
+        0,
+        maxScrollTop
+      );
+      container.scrollTop = targetScrollTop;
+      return true;
+    }
+
+    if (pageRefs.current.length === 0) {
+      return false;
+    }
+
+    container.scrollTop = snapshot.scrollRatio * maxScrollTop;
+    return true;
+  }
+
+  function tryRestoreScrollPosition() {
+    const snapshot = pendingScrollRestoreRef.current;
+    if (!snapshot) return;
+
+    const totalPages = numPagesRef.current;
+    const requiredPage = Math.min(snapshot.pageIndex + 1, totalPages);
+    if (requiredPage <= 0) return;
+
+    for (let pageNumber = 1; pageNumber <= requiredPage; pageNumber += 1) {
+      if (!renderedPagesRef.current.has(pageNumber)) {
+        return;
+      }
+    }
+
+    if (restoreFrameRef.current !== null) {
+      window.cancelAnimationFrame(restoreFrameRef.current);
+    }
+
+    restoreFrameRef.current = window.requestAnimationFrame(() => {
+      restoreFrameRef.current = null;
+      const pendingSnapshot = pendingScrollRestoreRef.current;
+      if (!pendingSnapshot) return;
+
+      if (restoreScrollSnapshot(pendingSnapshot)) {
+        pendingScrollRestoreRef.current = null;
+      }
+    });
+  }
+
+  useLayoutEffect(() => {
+    if (!pdfData) {
+      previousPdfRef.current = null;
+      downloadBytesRef.current = null;
+      pendingScrollRestoreRef.current = null;
+      renderedPagesRef.current = new Set();
+      numPagesRef.current = 0;
+      return;
+    }
+
+    if (previousPdfRef.current && previousPdfRef.current !== pdfData) {
+      pendingScrollRestoreRef.current = captureScrollSnapshot();
+      renderedPagesRef.current = new Set();
+      numPagesRef.current = 0;
+    }
+
+    previousPdfRef.current = pdfData;
+    downloadBytesRef.current = pdfData;
+  }, [pdfData]);
+
+  useEffect(() => {
+    return () => {
+      if (restoreFrameRef.current !== null) {
+        window.cancelAnimationFrame(restoreFrameRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    pageRefs.current.length = numPages;
+  }, [numPages]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -60,7 +186,7 @@ export function PdfPreview({ compileResult, pdfName = "document.pdf" }: PdfPrevi
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [displayPdf]);
+  }, [pdfData]);
 
   function handleDownload() {
     const bytes = downloadBytesRef.current;
@@ -74,7 +200,7 @@ export function PdfPreview({ compileResult, pdfName = "document.pdf" }: PdfPrevi
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
 
-  if (displayPdf) {
+  if (pdfData) {
     const pageWidth = containerWidth > 0 ? (containerWidth - 32) * zoom : undefined;
     // For rotated pages (90/270) swap the axis so we fill width correctly
     const isRotated90 = rotation === 90 || rotation === 270;
@@ -133,16 +259,31 @@ export function PdfPreview({ compileResult, pdfName = "document.pdf" }: PdfPrevi
           <div style={{ minWidth: "fit-content" }}>
             <Document
               file={pdfFile}
-              onLoadSuccess={({ numPages }) => setNumPages(numPages)}
+              onLoadSuccess={({ numPages }) => {
+                numPagesRef.current = numPages;
+                renderedPagesRef.current = new Set();
+                setNumPages(numPages);
+              }}
               className="py-4"
             >
             {Array.from({ length: numPages }, (_, i) => (
-              <div key={`page_${i + 1}_r${rotation}`} style={{ width: "fit-content", margin: "0 auto 1rem" }}>
+              <div
+                key={`page_${i + 1}_r${rotation}`}
+                ref={(element) => {
+                  pageRefs.current[i] = element;
+                }}
+                data-page-number={i + 1}
+                style={{ width: "fit-content", margin: "0 auto 1rem" }}
+              >
                 <Page
                   pageNumber={i + 1}
                   width={isRotated90 ? undefined : pageWidth}
                   height={isRotated90 ? pageWidth : undefined}
                   rotate={rotation}
+                  onRenderSuccess={() => {
+                    renderedPagesRef.current.add(i + 1);
+                    tryRestoreScrollPosition();
+                  }}
                   renderAnnotationLayer
                   renderTextLayer
                   className="shadow-lg"
