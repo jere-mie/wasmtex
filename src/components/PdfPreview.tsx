@@ -98,6 +98,13 @@ export function PdfPreview({ pdfData, isStale, pdfName = "document.pdf" }: PdfPr
     const targetPage = targetPageIndex >= 0 ? pageRefs.current[targetPageIndex] : null;
 
     if (targetPage && targetPage.offsetHeight > 0) {
+      // If the snapshot indicates the very top of the document, restore to 0
+      const isTopSnapshot = snapshot.scrollRatio === 0 || (snapshot.pageIndex === 0 && snapshot.pageProgress === 0);
+      if (isTopSnapshot) {
+        container.scrollTop = 0;
+        return true;
+      }
+
       const targetScrollTop = clamp(
         targetPage.offsetTop + targetPage.offsetHeight * snapshot.pageProgress,
         0,
