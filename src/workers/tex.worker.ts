@@ -91,7 +91,10 @@ function ensureTypstCompilerReady() {
         beforeBuild: [
           withAccessModel(typstPackageAccessModel),
           withPackageRegistry(typstPackageRegistry),
-          loadFonts([], {
+          loadFonts([
+            // Preload Bravura explicitly so it's available to Typst
+            `${TYPST_FONT_ASSET_PATH}/Bravura.otf`,
+          ], {
             assets: ["text"],
             assetUrlPrefix: TYPST_FONT_ASSET_PATH,
           }),
