@@ -359,15 +359,35 @@ async function convertSvgToPngDataUri(file: MarkdownCompileFile) {
   try {
     const image = await loadImageElement(svgBlobUrl);
     const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth || image.width || 480;
-    canvas.height = image.naturalHeight || image.height || 220;
+
+    const width = image.naturalWidth || image.width || 480;
+    const height = image.naturalHeight || image.height || 220;
+
+    // Rasterize SVG at a higher effective DPI for crispness in PDFs.
+    // Typical browser CSS px assume 96 DPI; target ~300 DPI for print-quality.
+    const DPR = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    const TARGET_DPI = 300;
+    const BASE_DPI = 96;
+    const maxScale = 6; // avoid excessive memory usage for very large scales
+    const computedScale = Math.ceil((TARGET_DPI / BASE_DPI) * DPR);
+    const scale = Math.min(maxScale, Math.max(3, computedScale));
+
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    // Keep CSS size equal to logical SVG size so layout remains unchanged
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
 
     const context = canvas.getContext("2d");
     if (!context) {
       throw new Error("Canvas 2D context is unavailable.");
     }
 
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    // Scale the drawing context so drawing the image at logical size
+    // produces a higher-resolution bitmap.
+    context.setTransform(scale, 0, 0, scale, 0, 0);
+    context.drawImage(image, 0, 0, width, height);
+
     return canvas.toDataURL("image/png");
   } finally {
     URL.revokeObjectURL(svgBlobUrl);
