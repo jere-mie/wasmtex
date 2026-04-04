@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Toaster, toast } from "sonner";
 import { Toolbar } from "@/components/Toolbar";
 import { FileExplorer } from "@/components/FileExplorer";
@@ -9,6 +9,7 @@ import { CompileConsole } from "@/components/CompileConsole";
 import { useFiles } from "@/context/FileContext";
 import { useTheme } from "@/context/ThemeContext";
 import type { CompileResponse, CompileStatusMessage } from "@/workers/tex.worker";
+import { compileMarkdownToPdf } from "@/lib/markdown-pdf";
 import { cn } from "@/lib/utils";
 import {
   collectProjectImportFromDataTransfer,
@@ -30,7 +31,14 @@ const DEFAULT_SIDEBAR_WIDTH = 240;
 const DEFAULT_PREVIEW_WIDTH = 540;
 const DEFAULT_CONSOLE_HEIGHT = 210;
 const AUTO_COMPILE_STORAGE_KEY = "wasmtex:auto-compile";
+const MARKDOWN_STYLES_STORAGE_KEY = "wasmtex:markdown-stylesheets";
+const DEFAULT_MARKDOWN_STYLESHEET = "markdown-print.css";
 const AUTO_COMPILE_DELAY_MS = 700;
+
+interface StoredMarkdownStylesheetSelection {
+  paths: string[];
+  hasStoredValue: boolean;
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -47,11 +55,47 @@ function getCompileEngineForFile(fileName: string): CompileEngine | null {
     return "typst";
   }
 
+  if (extension === "md") {
+    return "markdown";
+  }
+
   return null;
 }
 
 function getCompiledPdfName(fileName: string) {
-  return fileName.replace(/\.(tex|typ)$/i, ".pdf");
+  return fileName.replace(/\.(tex|typ|md)$/i, ".pdf");
+}
+
+function readStoredMarkdownStylesheetSelection(): StoredMarkdownStylesheetSelection {
+  if (typeof window === "undefined") {
+    return {
+      paths: [],
+      hasStoredValue: false,
+    };
+  }
+
+  try {
+    const raw = window.localStorage.getItem(MARKDOWN_STYLES_STORAGE_KEY);
+    if (raw === null) {
+      return {
+        paths: [],
+        hasStoredValue: false,
+      };
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    return {
+      paths: Array.isArray(parsed)
+        ? parsed.filter((entry): entry is string => typeof entry === "string")
+        : [],
+      hasStoredValue: true,
+    };
+  } catch {
+    return {
+      paths: [],
+      hasStoredValue: false,
+    };
+  }
 }
 
 function pickCompileTarget(
@@ -67,7 +111,7 @@ function pickCompileTarget(
     };
   }
 
-  for (const candidate of ["main.tex", "main.typ"]) {
+  for (const candidate of ["main.tex", "main.typ", "main.md"]) {
     const engine = getCompileEngineForFile(candidate);
     if (engine && files.some((file) => file.name === candidate)) {
       return {
@@ -145,6 +189,7 @@ function ResizeHandle({
 function App() {
   const { files, activeFile, importFiles } = useFiles();
   const { activeTheme } = useTheme();
+  const [storedMarkdownStylesheetSelection] = useState(readStoredMarkdownStylesheetSelection);
   const [compileResult, setCompileResult] = useState<CompileResponse | null>(null);
   const [previewPdf, setPreviewPdf] = useState<Uint8Array | null>(null);
   const [isPreviewStale, setIsPreviewStale] = useState(false);
@@ -156,6 +201,9 @@ function App() {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(AUTO_COMPILE_STORAGE_KEY) === "true";
   });
+  const [markdownStylesheetPaths, setMarkdownStylesheetPaths] = useState<string[]>(
+    storedMarkdownStylesheetSelection.paths
+  );
   const [compilePhase, setCompilePhase] = useState<CompileStatusMessage["phase"] | null>(null);
   const [compileStartTime, setCompileStartTime] = useState<number | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
@@ -180,6 +228,43 @@ function App() {
     })
     .join("\u001f");
 
+  const markdownStylesheets = useMemo(
+    () => files
+      .filter((file) => file.kind === "text" && getFileExtension(file.name) === "css")
+      .map((file) => file.name)
+      .sort((left, right) => left.localeCompare(right)),
+    [files]
+  );
+
+  const selectedMarkdownStylesheetPaths = useMemo(() => {
+    const availablePaths = new Set(markdownStylesheets);
+    const filtered = markdownStylesheetPaths.filter((path) => availablePaths.has(path));
+
+    if (
+      !storedMarkdownStylesheetSelection.hasStoredValue &&
+      filtered.length === 0 &&
+      availablePaths.has(DEFAULT_MARKDOWN_STYLESHEET)
+    ) {
+      return [DEFAULT_MARKDOWN_STYLESHEET];
+    }
+
+    return filtered;
+  }, [markdownStylesheetPaths, markdownStylesheets, storedMarkdownStylesheetSelection.hasStoredValue]);
+
+  const compileVersion = `${projectVersion}\u001e${selectedMarkdownStylesheetPaths.join("\u001d")}`;
+
+  const toggleMarkdownStylesheet = useCallback((path: string) => {
+    const nextSelection = selectedMarkdownStylesheetPaths.includes(path)
+      ? selectedMarkdownStylesheetPaths.filter((entry) => entry !== path)
+      : [...selectedMarkdownStylesheetPaths, path].sort((left, right) => left.localeCompare(right));
+
+    setMarkdownStylesheetPaths(nextSelection);
+  }, [selectedMarkdownStylesheetPaths]);
+
+  const clearMarkdownStylesheets = useCallback(() => {
+    setMarkdownStylesheetPaths([]);
+  }, []);
+
   const handleCompileResult = useCallback((result: CompileResponse) => {
     setCompileResult(result);
     setCompileEngine(result.engine);
@@ -196,7 +281,11 @@ function App() {
       setIsPreviewStale(previewPdfRef.current !== null);
     }
 
-    const engineLabel = result.engine === "latex" ? "LaTeX" : "Typst";
+    const engineLabel = result.engine === "latex"
+      ? "LaTeX"
+      : result.engine === "typst"
+        ? "Typst"
+        : "Markdown";
     if (result.success) {
       toast.success(`${engineLabel} compilation successful`, {
         description: `${result.mainFile} built without errors.`,
@@ -214,15 +303,28 @@ function App() {
     const target = pickCompileTarget(files, activeFile);
     if (!target) {
       toast.error("No compilable source file", {
-        description: "Add or select a .tex or .typ file to compile.",
+        description: "Add or select a .tex, .typ, or .md file to compile.",
       });
       return;
     }
 
-    lastCompileVersionRef.current = projectVersion;
+    lastCompileVersionRef.current = compileVersion;
     setCompileEngine(target.engine);
     setIsCompiling(true);
     setCompileStartTime(Date.now());
+    setCompiledPdfName(target.pdfName);
+
+    if (target.engine === "markdown") {
+      void compileMarkdownToPdf({
+        files,
+        mainFile: target.mainFile,
+        stylesheetPaths: selectedMarkdownStylesheetPaths,
+        onStatusChange: setCompilePhase,
+      }).then((result) => {
+        handleCompileResult(result);
+      });
+      return;
+    }
 
     if (!workerRef.current) {
       workerRef.current = new Worker(
@@ -232,7 +334,6 @@ function App() {
     }
 
     const worker = workerRef.current;
-    setCompiledPdfName(target.pdfName);
 
     worker.onmessage = (event: MessageEvent<CompileResponse | CompileStatusMessage>) => {
       if (event.data.type === "compile-status") {
@@ -248,7 +349,7 @@ function App() {
       files: files.map((file) => ({ name: file.name, content: file.content })),
       mainFile: target.mainFile,
     });
-  }, [activeFile, files, handleCompileResult, isCompiling, projectVersion]);
+  }, [activeFile, compileVersion, files, handleCompileResult, isCompiling, selectedMarkdownStylesheetPaths]);
 
   const notifyProjectImport = useCallback((fileCount: number, folderCount: number) => {
     toast.success("Project imported", {
@@ -264,11 +365,18 @@ function App() {
   }, [autoCompile]);
 
   useEffect(() => {
+    window.localStorage.setItem(
+      MARKDOWN_STYLES_STORAGE_KEY,
+      JSON.stringify(selectedMarkdownStylesheetPaths)
+    );
+  }, [selectedMarkdownStylesheetPaths]);
+
+  useEffect(() => {
     if (!autoCompile || isCompiling || files.length === 0) {
       return;
     }
 
-    if (projectVersion === lastCompileVersionRef.current) {
+    if (compileVersion === lastCompileVersionRef.current) {
       return;
     }
 
@@ -279,7 +387,7 @@ function App() {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [autoCompile, files.length, handleCompile, isCompiling, projectVersion]);
+  }, [autoCompile, compileVersion, files.length, handleCompile, isCompiling]);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 767px)");
@@ -513,6 +621,10 @@ function App() {
         onAutoCompileChange={setAutoCompile}
         isSettingsOpen={isSettingsOpen}
         onSettingsOpenChange={setIsSettingsOpen}
+        markdownStylesheets={markdownStylesheets}
+        selectedMarkdownStylesheets={selectedMarkdownStylesheetPaths}
+        onToggleMarkdownStylesheet={toggleMarkdownStylesheet}
+        onClearMarkdownStylesheets={clearMarkdownStylesheets}
       />
 
       {isMobile ? (

@@ -11,7 +11,7 @@ import { FetchPackageRegistry } from "@myriaddreamin/typst.ts/fs/package";
 import typstCompilerWasmUrl from "@myriaddreamin/typst-ts-web-compiler/wasm?url";
 import type { VFSFile } from "@/lib/project-files";
 
-export type CompileEngine = "latex" | "typst";
+export type CompileEngine = "latex" | "typst" | "markdown";
 
 export interface CompileRequest {
   type: "compile";
@@ -281,8 +281,10 @@ self.onmessage = async (event: MessageEvent<CompileRequest>) => {
 
     if (engine === "latex") {
       await ensureLatexRunnerReady();
-    } else {
+    } else if (engine === "typst") {
       await ensureTypstCompilerReady();
+    } else {
+      throw new Error("Markdown compilation is handled on the main thread.");
     }
 
     const statusCompiling: CompileStatusMessage = { type: "compile-status", phase: "compiling" };

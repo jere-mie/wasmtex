@@ -57,7 +57,11 @@ export function CompileConsole({ compileResult, compileEngine, isCompiling, comp
   const isInitializing = isCompiling && compilePhase === "initializing";
   const isRunning = isCompiling && compilePhase === "compiling";
   const currentEngine = (isCompiling ? compileEngine : compileResult?.engine ?? compileEngine) ?? "latex";
-  const currentEngineLabel = currentEngine === "typst" ? "Typst" : "LaTeX";
+  const currentEngineLabel = currentEngine === "typst"
+    ? "Typst"
+    : currentEngine === "markdown"
+      ? "Markdown"
+      : "LaTeX";
 
   // Fake progress: ease quickly to ~80% over 90s, then crawl toward 95%.
   // Snaps to 100% the moment the compiling phase starts.
@@ -119,7 +123,11 @@ export function CompileConsole({ compileResult, compileEngine, isCompiling, comp
               <div className="flex items-center gap-2 text-amber-glow">
                 <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
                 <span className="font-semibold">
-                  {currentEngine === "typst" ? "Initializing Typst compiler..." : "Downloading LaTeX runtime..."}
+                  {currentEngine === "typst"
+                    ? "Initializing Typst compiler..."
+                    : currentEngine === "markdown"
+                      ? "Preparing markdown PDF renderer..."
+                      : "Downloading LaTeX runtime..."}
                 </span>
                 <span className="ml-auto font-mono text-[10px] text-ink-400">
                   {Math.round(initProgress)}%
@@ -135,7 +143,9 @@ export function CompileConsole({ compileResult, compileEngine, isCompiling, comp
               <p className="text-ink-400 text-[11px] leading-relaxed">
                 {currentEngine === "typst"
                   ? "The Typst WASM runtime and default text font assets are loading. This usually happens once per browser session before the first Typst compile."
-                  : "The LaTeX runtime (~430 MB) is being fetched from the server. This only happens once, and later LaTeX compiles will be much faster."}
+                  : currentEngine === "markdown"
+                    ? "Markdown is being parsed and converted into a print-ready PDF document using vector text and layout primitives."
+                    : "The LaTeX runtime (~430 MB) is being fetched from the server. This only happens once, and later LaTeX compiles will be much faster."}
               </p>
             </div>
           )}
@@ -143,7 +153,7 @@ export function CompileConsole({ compileResult, compileEngine, isCompiling, comp
           {isRunning && (
             <div className="flex items-center gap-2 text-amber-glow">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              <span>Compiling {currentEngineLabel} document...</span>
+              <span>{currentEngine === "markdown" ? "Rendering Markdown PDF..." : `Compiling ${currentEngineLabel} document...`}</span>
             </div>
           )}
 

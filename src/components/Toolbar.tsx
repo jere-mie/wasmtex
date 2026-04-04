@@ -23,6 +23,7 @@ import {
 import { buildZip } from "@/lib/zip";
 import { collectProjectImportFromFileList } from "@/lib/project-files";
 import { ThemePanel } from "@/components/ThemePanel";
+import { MarkdownStylesheetPanel } from "@/components/MarkdownStylesheetPanel";
 
 interface ToolbarProps {
   onCompile: () => void;
@@ -31,6 +32,10 @@ interface ToolbarProps {
   onAutoCompileChange: (enabled: boolean) => void;
   isSettingsOpen: boolean;
   onSettingsOpenChange: (open: boolean) => void;
+  markdownStylesheets: string[];
+  selectedMarkdownStylesheets: string[];
+  onToggleMarkdownStylesheet: (path: string) => void;
+  onClearMarkdownStylesheets: () => void;
 }
 
 export function Toolbar({
@@ -40,6 +45,10 @@ export function Toolbar({
   onAutoCompileChange,
   isSettingsOpen,
   onSettingsOpenChange,
+  markdownStylesheets,
+  selectedMarkdownStylesheets,
+  onToggleMarkdownStylesheet,
+  onClearMarkdownStylesheets,
 }: ToolbarProps) {
   const { createFile, importFiles, files } = useFiles();
   const { resetToDefaults } = useFiles();
@@ -218,14 +227,14 @@ export function Toolbar({
           <DialogHeader>
             <DialogTitle>New File</DialogTitle>
             <DialogDescription>
-              Enter a name for the new LaTeX or Typst file.
+              Enter a name for the new LaTeX, Typst, or Markdown file.
             </DialogDescription>
           </DialogHeader>
           <input
             value={newFileName}
             onChange={(e) => setNewFileName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleNewFile()}
-            placeholder="chapter1.tex or article.typ"
+            placeholder="chapter1.tex, article.typ, or notes.md"
             className="w-full px-3 py-2 rounded-md bg-ink-800 border border-ink-600 text-ink-100 text-sm font-mono focus:outline-none focus:border-amber-glow placeholder:text-ink-500"
             autoFocus
           />
@@ -292,6 +301,15 @@ export function Toolbar({
               <ThemePanel />
             </div>
 
+            <div className="rounded-lg border border-ink-700 bg-ink-900/70 p-4">
+              <MarkdownStylesheetPanel
+                availableStylesheets={markdownStylesheets}
+                selectedStylesheets={selectedMarkdownStylesheets}
+                onToggleStylesheet={onToggleMarkdownStylesheet}
+                onClearStylesheets={onClearMarkdownStylesheets}
+              />
+            </div>
+
           <div className="rounded-lg border border-ink-700 bg-ink-900/70 p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="space-y-1">
@@ -328,7 +346,7 @@ export function Toolbar({
               <div className="space-y-1">
                 <h3 className="text-sm font-medium text-ink-100">Clear filesystem</h3>
                 <p className="text-sm text-ink-400">
-                  Delete all project files and restore the two default starter files.
+                  Delete all project files and restore the default LaTeX, Typst, and Markdown starter files.
                 </p>
               </div>
               {confirmClear ? (
@@ -347,7 +365,7 @@ export function Toolbar({
                       setConfirmClear(false);
                       await resetToDefaults();
                       toast.success("Filesystem cleared", {
-                        description: "Restored default main.tex and main.typ.",
+                        description: "Restored default main.tex, main.typ, and main.md starters.",
                       });
                     }}
                   >

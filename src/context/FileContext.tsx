@@ -80,6 +80,103 @@ $ x = (-b plus.minus sqrt(b^2 - 4a c)) / (2a) $
 
 `;
 
+const DEFAULT_MAIN_MD = `# WasmTeX Markdown Demo
+
+Markdown documents can now compile directly to vector PDFs in the browser.
+
+## Print-ready defaults
+
+- Clean A4 page layout
+- Live hyperlinks such as [Typst](https://typst.app) and [LaTeX Project](https://www.latex-project.org)
+- Nested lists for structured notes
+  - Second-level items stay indented
+  - Code blocks and tables keep their formatting
+
+## Local image asset
+
+![A sample diagram](assets/markdown-diagram.svg)
+
+## Table support
+
+| Feature | Status | Notes |
+| --- | --- | --- |
+| Headings | Ready | Print-optimized hierarchy |
+| Links | Ready | Preserved as clickable PDF links |
+| Tables | Ready | Styled with borders and header fills |
+| Code | Ready | Syntax highlighting included |
+
+## Code block
+
+~~~ts
+type CompileMode = "latex" | "typst" | "markdown";
+
+export function selectMainFile(files: string[], preferred: string) {
+  return files.includes(preferred) ? preferred : files[0] ?? "main.md";
+}
+~~~
+
+> Edit \`markdown-print.css\` and enable it in Settings to customize this PDF output.
+`;
+
+const DEFAULT_MARKDOWN_PRINT_CSS = `body {
+  color: #1f2937;
+}
+
+h1,
+h2,
+h3 {
+  color: #6b2d10;
+}
+
+blockquote {
+  background-color: #fff7ed;
+  border-left-color: #c98b4a;
+}
+
+table thead {
+  background-color: #f6e7d8;
+}
+
+code {
+  color: #9a3412;
+}
+`;
+
+const DEFAULT_MARKDOWN_DIAGRAM = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="220" viewBox="0 0 480 220" fill="none">
+  <rect width="480" height="220" rx="24" fill="#fffaf5"/>
+  <rect x="32" y="38" width="136" height="58" rx="16" fill="#8c3b15"/>
+  <rect x="174" y="38" width="132" height="58" rx="16" fill="#c98b4a"/>
+  <rect x="314" y="38" width="134" height="58" rx="16" fill="#0f766e"/>
+  <path d="M168 67H174" stroke="#6b7280" stroke-width="6" stroke-linecap="round"/>
+  <path d="M306 67H314" stroke="#6b7280" stroke-width="6" stroke-linecap="round"/>
+  <text x="100" y="72" text-anchor="middle" fill="#fffaf5" font-family="Helvetica, Arial, sans-serif" font-size="19" font-weight="700">Markdown</text>
+  <text x="240" y="72" text-anchor="middle" fill="#3f2a15" font-family="Helvetica, Arial, sans-serif" font-size="19" font-weight="700">HTML + CSS</text>
+  <text x="381" y="72" text-anchor="middle" fill="#f0fdfa" font-family="Helvetica, Arial, sans-serif" font-size="19" font-weight="700">Vector PDF</text>
+  <text x="240" y="148" text-anchor="middle" fill="#4b5563" font-family="Helvetica, Arial, sans-serif" font-size="18">All rendered inside the browser with print-focused styling.</text>
+  <path d="M82 168C118 148 152 148 190 168C228 188 262 188 300 168C338 148 372 148 408 168" stroke="#d4a574" stroke-width="8" stroke-linecap="round"/>
+</svg>
+`;
+
+function createDefaultStarterFiles(): VFSFile[] {
+  return [
+    { name: "main.tex", content: DEFAULT_MAIN_TEX, kind: "text" },
+    { name: "main.typ", content: DEFAULT_MAIN_TYP, kind: "text" },
+    { name: "main.md", content: DEFAULT_MAIN_MD, kind: "text" },
+    {
+      name: "markdown-print.css",
+      content: DEFAULT_MARKDOWN_PRINT_CSS,
+      kind: "text",
+      mimeType: "text/css",
+    },
+    {
+      name: "assets/markdown-diagram.svg",
+      content: DEFAULT_MARKDOWN_DIAGRAM,
+      kind: "text",
+      mimeType: "image/svg+xml",
+    },
+  ];
+}
+
 interface FileContextType {
   files: VFSFile[];
   folders: string[];
@@ -183,24 +280,20 @@ export function FileProvider({ children }: { children: ReactNode }) {
       const storedFolders = await get(IDB_FOLDERS_KEY);
 
       if (vfsKeys.length === 0) {
-        // Initialize with default main.tex and a sample main.typ
-        const texFile: VFSFile = {
-          name: "main.tex",
-          content: DEFAULT_MAIN_TEX,
-          kind: "text",
-        };
-        const typFile: VFSFile = {
-          name: "main.typ",
-          content: DEFAULT_MAIN_TYP,
-          kind: "text",
-        };
-        await set(IDB_PREFIX + "main.tex", serializeFile(texFile));
-        await set(IDB_PREFIX + "main.typ", serializeFile(typFile));
-        setFiles([texFile, typFile]);
-        setFolders([]);
-        // Preserve original behavior: keep main.tex active, but open both files
+        const starterFiles = createDefaultStarterFiles();
+        const starterFolders = sortFolders(
+          starterFiles.flatMap((file) => getAncestorFolders(file.name))
+        );
+
+        for (const file of starterFiles) {
+          await set(IDB_PREFIX + file.name, serializeFile(file));
+        }
+
+        await set(IDB_FOLDERS_KEY, starterFolders);
+        setFiles(sortFiles(starterFiles));
+        setFolders(starterFolders);
         setActiveFile("main.tex");
-        setOpenFiles(["main.tex", "main.typ"]);
+        setOpenFiles(["main.tex", "main.typ", "main.md"]);
       } else {
         const loaded: VFSFile[] = [];
         for (const key of vfsKeys) {
@@ -481,15 +574,20 @@ export function FileProvider({ children }: { children: ReactNode }) {
   );
 
   const resetToDefaults = useCallback(async () => {
-    // Wipe everything from IndexedDB then re-seed with the two default files
     await clear();
-    const texFile: VFSFile = { name: "main.tex", content: DEFAULT_MAIN_TEX, kind: "text" };
-    const typFile: VFSFile = { name: "main.typ", content: DEFAULT_MAIN_TYP, kind: "text" };
-    await set(IDB_PREFIX + "main.tex", serializeFile(texFile));
-    await set(IDB_PREFIX + "main.typ", serializeFile(typFile));
-    setFiles([texFile, typFile]);
-    setFolders([]);
-    setOpenFiles(["main.tex", "main.typ"]);
+    const starterFiles = createDefaultStarterFiles();
+    const starterFolders = sortFolders(
+      starterFiles.flatMap((file) => getAncestorFolders(file.name))
+    );
+
+    for (const file of starterFiles) {
+      await set(IDB_PREFIX + file.name, serializeFile(file));
+    }
+
+    await set(IDB_FOLDERS_KEY, starterFolders);
+    setFiles(sortFiles(starterFiles));
+    setFolders(starterFolders);
+    setOpenFiles(["main.tex", "main.typ", "main.md"]);
     setActiveFile("main.tex");
   }, []);
 
