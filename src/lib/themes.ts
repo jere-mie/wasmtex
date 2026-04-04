@@ -227,7 +227,7 @@ const OBSIDIAN: WasmTexTheme = {
   name: 'Obsidian',
   isDark: true,
   builtin: true,
-  description: 'Jet black with electric cyan — stark, precise, futuristic.',
+  description: 'Jet black with electric cyan - stark, precise, futuristic.',
   colors: {
     '--color-ink-950': '#030408',
     '--color-ink-900': '#060810',

@@ -26,7 +26,7 @@ interface BuilderProps {
 function randomColors(dark: boolean): { bg: string; text: string; accent: string } {
   const rand = (min: number, max: number) => Math.random() * (max - min) + min;
   const bgHue    = Math.random() * 360;
-  // accent hue is 120–200° away from bg so it's clearly distinct
+  // accent hue is 120-200° away from bg so it's clearly distinct
   const accentHue = (bgHue + rand(120, 200)) % 360;
   if (dark) {
     const bgS      = rand(5, 20);   // low saturation for dark bg
@@ -161,7 +161,7 @@ export function ThemeBuilder({ open, onOpenChange }: BuilderProps) {
         <DialogHeader>
           <DialogTitle>Build a Theme</DialogTitle>
           <DialogDescription>
-            Pick three colours — the rest of the palette is generated automatically.
+            Pick three colours - the rest of the palette is generated automatically.
           </DialogDescription>
         </DialogHeader>
 

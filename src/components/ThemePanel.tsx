@@ -144,7 +144,7 @@ export function ThemePanel() {
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-ink-100">Appearance</h3>
         <span className="text-xs text-ink-500">
-          {activeTheme.isDark ? 'Dark' : 'Light'} — {activeTheme.name}
+          {activeTheme.isDark ? 'Dark' : 'Light'} - {activeTheme.name}
         </span>
       </div>
 
